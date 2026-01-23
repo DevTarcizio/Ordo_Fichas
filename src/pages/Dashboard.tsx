@@ -28,7 +28,7 @@ export default function Dashboard() {
                     </p>
                     <button
                         className="mt-2 py-3 px-6 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-smalltitle transition w-full"
-                        onClick={() => alert("Função de criar personagem ainda não implementada")}
+                        onClick={() => navigate("/characters/create")}
                     >
                         Criar Personagem
                     </button>
