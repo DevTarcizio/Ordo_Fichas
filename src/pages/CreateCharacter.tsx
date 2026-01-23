@@ -201,28 +201,28 @@ export default function CreateCharacter() {
 
                             <div className="grid grid-cols-3 gap-4">
 
-                                <input 
+                                <FloatingInput 
+                                    label="Nex Total"
                                     name="nex_total" 
                                     type="number"
-                                    placeholder="Nex Total" 
-                                    onChange={handleChange} 
-                                    className="input"
+                                    value={form.nex_total} 
+                                    onChange={handleChange}
                                 />
 
-                                <input 
+                                <FloatingInput 
+                                    label="Nex da Classe"
                                     name="nex_class" 
                                     type="number"
-                                    placeholder="Nex da Classe" 
-                                    onChange={handleChange} 
-                                    className="input"
+                                    value={form.nex_class} 
+                                    onChange={handleChange}
                                 />
 
-                                <input 
+                                <FloatingInput
+                                    label="Nex da Sub-Classe"
                                     name="nex_subclass" 
                                     type="number"
-                                    placeholder="Nex da Sub-Classe" 
-                                    onChange={handleChange} 
-                                    className="input"
+                                    value={form.nex_subclass}
+                                    onChange={handleChange}
                                 />
 
                             </div>
@@ -237,28 +237,28 @@ export default function CreateCharacter() {
 
                             <div className="grid grid-cols-3 gap-4">
 
-                                <input 
+                                <FloatingInput
+                                    label="Pontos de Vida" 
                                     name="healthy_points" 
                                     type="number"
-                                    placeholder="Pontos de Vida" 
-                                    onChange={handleChange} 
-                                    className="input"
+                                    value={form.healthy_points}
+                                    onChange={handleChange}
                                 />
 
-                                <input 
+                                <FloatingInput
+                                    label="Pontos de Sanidade" 
                                     name="sanity_points" 
                                     type="number"
-                                    placeholder="Pontos de Sanidade" 
-                                    onChange={handleChange} 
-                                    className="input"
+                                    value={form.sanity_points}
+                                    onChange={handleChange}
                                 />
 
-                                <input 
+                                <FloatingInput
+                                    label="Pontos de Esforço" 
                                     name="effort_points" 
                                     type="number"
-                                    placeholder="Pontos de Esforço" 
-                                    onChange={handleChange} 
-                                    className="input"
+                                    value={form.effort_points}
+                                    onChange={handleChange}
                                 />
 
                             </div>
