@@ -6,6 +6,57 @@ import MainLayout from "../components/MainLayout"
 export default function CreateCharacter() {
     const navigate = useNavigate()
 
+    const origins = [
+        "Acadêmico", 
+        "Agente de Saúde",
+        "Amnésico",
+        "Artista",
+        "Atleta",
+        "Chef",
+        "Cientista Forense",
+        "Criminoso",
+        "Cultista Arrependido",
+        "Desgarrado",
+        "Engenheiro",
+        "Executivo",
+        "Escritor",
+        "Investigador",
+        "Jornalista",
+        "Lutador",
+        "Magnata",
+        "Mercenário",
+        "Militar",
+        "Operário",
+        "Policial",
+        "Professor",
+        "Religioso",
+        "Servidor Público",
+        "Teórico da Conspiração",
+        "TI",
+        "Trabalhador Rural",
+        "Trambiqueiro",
+        "Universitário",
+        "Vítima",
+        "Prodígio Paranormal",
+        "Oficial Militar"
+    ]
+
+    const classes = [
+        "Mundano",
+        "Combatente",
+        "Especialista",
+        "Ocultista",
+        "Transformado"
+    ]
+
+    const ranks = [
+        "Nenhum",
+        "Recruta",
+        "Operador",
+        "Agente Especial",
+        "Oficial de Operações",
+        "Agente de Elite"
+    ]
 
     const [form, setForm] = useState({
         name: "",
@@ -72,209 +123,284 @@ export default function CreateCharacter() {
 
     return (
         <MainLayout>
-            <div className="min-h-screen bg-zinc-900 text-white flex justify-center items-center px-6">
+            <div className="min-h-screen text-white flex justify-center items-center px-4 md:px-6 py-4 md:py-6">
                 <form
                     onSubmit={handleSubmit}
-                    className="w-full max-w-4xl bg-zinc-800 border border-zinc-700 rounded-lg p-8 flex flex-col gap-6"
+                    className="w-full max-w-5xl border border-zinc-700 rounded-lg overflow-hidden"
                 >
-                    <h1 className="text-3xl font-bigtitle text-blue-500">
-                        Criar Personagem
-                    </h1>
 
-                    {/* Identidade */}
-                    <section>
-                        
-                        <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                            Identidade
-                        </h2>
-
-                        <div className="grid grid-cols-2 gap-4"> 
-                            
-                            <input 
-                                name="name" 
-                                placeholder="Nome" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="age" 
-                                type="number"
-                                placeholder="Idade" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="origin" 
-                                placeholder="Origem" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="character_class" 
-                                placeholder="Classe" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="rank" 
-                                placeholder="Patente" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                        </div>
-
-                    </section>
-
-                    {/* Progressão */}
-                    <section>
-
-                        <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                            Progressão
-                        </h2>
-
-                        <div className="grid grid-cols-3 gap-4">
-
-                            <input 
-                                name="nex_total" 
-                                type="number"
-                                placeholder="Nex Total" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="nex_class" 
-                                type="number"
-                                placeholder="Nex da Classe" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="nex_subclass" 
-                                type="number"
-                                placeholder="Nex da Sub-Classe" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                        </div>
-                    </section>
-
-                    {/* Recursos */}
-                    <section>
-
-                        <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                            Recursos
-                        </h2>
-
-                        <div className="grid grid-cols-3 gap-4">
-
-                            <input 
-                                name="healthy_points" 
-                                type="number"
-                                placeholder="Pontos de Vida" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="sanity_points" 
-                                type="number"
-                                placeholder="Pontos de Sanidade" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="effort_points" 
-                                type="number"
-                                placeholder="Pontos de Esforço" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                        </div>
-
-                    </section>
-
-                    {/* Atributos */}
-                    <section>
-
-                        <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                            Atributos
-                        </h2>
-
-                        <div className="grid grid-cols-5 gap-4">
-
-                            <input 
-                                name="atrib_agility" 
-                                type="number"
-                                placeholder="Agilidade" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="atrib_intellect" 
-                                type="number"
-                                placeholder="Intelecto" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="atrib_vitallity" 
-                                type="number"
-                                placeholder="Vigor" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="atrib_presence" 
-                                type="number"
-                                placeholder="Presença" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                            <input 
-                                name="atrib_strength" 
-                                type="number"
-                                placeholder="Força" 
-                                onChange={handleChange} 
-                                className="input"
-                            />
-
-                        </div>
-
-                    </section>
-
-                    <div className="flex justify-end gap-4 mt-4">
-                        <button
-                            type="button"
-                            onClick={() => navigate("/dashboard/")}
-                            className="px-6 py-3 bg-zinc-600 rounded hover:bg-zinc-700"
-                        >
-                            Cancelar
-                        </button>
-
-                        <button
-                            type="submit"
-                            className="px-6 py-3 bg-blue-600 rounded hover:bg-blue-700"
-                        >
+                    {/* Header do Card*/}
+                    <div className="bg-zinc-900 p-6">
+                        <h1 className="text-3xl font-bigtitle text-blue-500">
                             Criar Personagem
-                        </button>
+                        </h1>
+                    </div>
+
+                    {/* Body do Card */}
+                    <div className="bg-zinc-800 p-6 flex flex-col gap-6">
+
+                        {/* Identidade */}
+                        <section>
+                            
+                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
+                                Identidade
+                            </h2>
+
+                            <div className="grid grid-cols-2 gap-4"> 
+                                
+                                <FloatingInput 
+                                    label="Nome"
+                                    name="name"
+                                    value={form.name}
+                                    onChange={handleChange}
+                                />
+
+                                <FloatingInput 
+                                    label="Idade"
+                                    type="number"
+                                    name="age"
+                                    value={form.age}
+                                    onChange={handleChange}
+                                />
+
+                                <FloatingSelect 
+                                    label="Origem"
+                                    name="origin"
+                                    value={form.origin}
+                                    onChange={handleChange}
+                                    options={origins}
+                                />
+
+                                <FloatingSelect 
+                                    label="Classe"
+                                    name="character_class"
+                                    value={form.character_class}
+                                    onChange={handleChange}
+                                    options={classes}
+                                />
+
+                                <FloatingSelect 
+                                    label="Patente"
+                                    name="rank"
+                                    value={form.rank}
+                                    onChange={handleChange}
+                                    options={ranks}
+                                />
+
+                            </div>
+
+                        </section>
+
+                        
+                        {/* Progressão */}
+                        <section>
+
+                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
+                                Progressão
+                            </h2>
+
+                            <div className="grid grid-cols-3 gap-4">
+
+                                <input 
+                                    name="nex_total" 
+                                    type="number"
+                                    placeholder="Nex Total" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="nex_class" 
+                                    type="number"
+                                    placeholder="Nex da Classe" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="nex_subclass" 
+                                    type="number"
+                                    placeholder="Nex da Sub-Classe" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                            </div>
+                        </section>
+
+                        {/* Recursos */}
+                        <section>
+
+                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
+                                Recursos
+                            </h2>
+
+                            <div className="grid grid-cols-3 gap-4">
+
+                                <input 
+                                    name="healthy_points" 
+                                    type="number"
+                                    placeholder="Pontos de Vida" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="sanity_points" 
+                                    type="number"
+                                    placeholder="Pontos de Sanidade" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="effort_points" 
+                                    type="number"
+                                    placeholder="Pontos de Esforço" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                            </div>
+
+                        </section>
+
+                        {/* Atributos */}
+                        <section>
+
+                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
+                                Atributos
+                            </h2>
+
+                            <div className="grid grid-cols-5 gap-4">
+
+                                <input 
+                                    name="atrib_agility" 
+                                    type="number"
+                                    placeholder="Agilidade" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="atrib_intellect" 
+                                    type="number"
+                                    placeholder="Intelecto" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="atrib_vitallity" 
+                                    type="number"
+                                    placeholder="Vigor" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="atrib_presence" 
+                                    type="number"
+                                    placeholder="Presença" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                                <input 
+                                    name="atrib_strength" 
+                                    type="number"
+                                    placeholder="Força" 
+                                    onChange={handleChange} 
+                                    className="input"
+                                />
+
+                            </div>
+
+                        </section>
+
+                        <div className="flex justify-end gap-4 mt-4">
+                            <button
+                                type="button"
+                                onClick={() => navigate("/dashboard/")}
+                                className="px-6 py-3 bg-zinc-600 rounded hover:bg-zinc-700"
+                            >
+                                Cancelar
+                            </button>
+
+                            <button
+                                type="submit"
+                                className="px-6 py-3 bg-blue-600 rounded hover:bg-blue-700"
+                            >
+                                Criar Personagem
+                            </button>
+                        </div>
                     </div>
                 </form>
             </div>
         </MainLayout>
         
-           )
+    )
+}
+
+interface FloatingInputsProps {
+    label: string
+    name: string
+    value: string | number
+    type?: string
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+}
+
+function FloatingInput({ label, name, value, type = "text", onChange }: FloatingInputsProps) {
+    return (
+        <div className="relative w-full">
+            <input 
+                type={type}
+                name={name}
+                id={name}
+                value={value}
+                onChange={onChange}
+                placeholder=""
+                className="peer w-full px-4 pt-5 pb-3 border border-zinc-700 rounded-lg bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-text"
+            />
+            <label 
+                htmlFor={name}
+                className={`absolute left-4 text-zinc-400 transition-all duration-200 ${value ? "top-1 text-sm text-blue-400" : "top-3 text-base text-zinc-400"} peer-focus:top-1 peer-focus:text-sm peer-focus:text-blue-400 font-text`}
+            >
+                {label}
+            </label>
+        </div>
+    )
+}
+
+interface FloatingSelectProps {
+    label: string
+    name: string
+    value: string
+    options: string[]
+    onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
+}
+
+function FloatingSelect({ label, name, value, options, onChange }: FloatingSelectProps) {
+    return (
+        <div className="relative w-full">
+            <select 
+                name={name}
+                id={name}
+                value={value}
+                onChange={onChange}
+                className="peer w-full px-4 pt-5 pb-3 border border-zinc-700 rounded-lg bg-zinc-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-600 font-text"
+            >
+                <option value="" disabled hidden></option>
+                {options.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                ))}
+            </select>
+            <label 
+                htmlFor={name}
+                className="absolute left-4 top-1 text-sm text-zinc-400 peer-focus:text-blue-400 pointer-events-none transition-colors duration-200 font-text"
+            >
+                {label}
+            </label>
+        </div>
+    )
 }

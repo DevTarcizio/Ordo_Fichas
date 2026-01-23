@@ -38,7 +38,7 @@
 }
 
 .input {
-  @apply px-4 py-3 rounded-lg bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-600 font-text;
+  @apply px-4 py-3 rounded-lg bg-zinc-800 border border-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 font-text text-white;
 }
 
 .input_password {
