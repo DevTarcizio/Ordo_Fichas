@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
+import atributos_img from "../assets/atributos.png"
 
 export default function CreateCharacter() {
     const navigate = useNavigate()
@@ -139,21 +140,23 @@ export default function CreateCharacter() {
                     {/* Body do Card */}
                     <div className="bg-zinc-800 p-6 flex flex-col gap-6">
 
-                        {/* Identidade */}
-                        <section>
-                            
-                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                                Identidade
-                            </h2>
+                        {/* Inputs Principais */}
+                        {/* Primeira Linha */}
+                        <div className="flex w-full gap-4">
 
-                            <div className="grid grid-cols-2 gap-4"> 
+                            
+                            <div className="flex-2 min-w-50"> 
                                 
                                 <FloatingInput 
                                     label="Nome"
                                     name="name"
                                     value={form.name}
                                     onChange={handleChange}
-                                />
+                                    />
+
+                            </div>
+
+                            <div className="flex-1 min-w-25">
 
                                 <FloatingInput 
                                     label="Idade"
@@ -163,6 +166,14 @@ export default function CreateCharacter() {
                                     onChange={handleChange}
                                 />
 
+                            </div>
+
+                        </div>
+
+                        {/* Segunda Linha */}
+                        <div className="flex w-full gap-4 mt-2">
+                            <div className="flex-1 min-w-30">
+
                                 <FloatingSelect 
                                     label="Origem"
                                     name="origin"
@@ -171,6 +182,10 @@ export default function CreateCharacter() {
                                     options={origins}
                                 />
 
+                            </div>
+
+                            <div className="flex-1 min-w-30">
+
                                 <FloatingSelect 
                                     label="Classe"
                                     name="character_class"
@@ -178,6 +193,10 @@ export default function CreateCharacter() {
                                     onChange={handleChange}
                                     options={classes}
                                 />
+
+                            </div>
+
+                            <div className="flex-1 min-w-30">
 
                                 <FloatingSelect 
                                     label="Patente"
@@ -188,9 +207,7 @@ export default function CreateCharacter() {
                                 />
 
                             </div>
-
-                        </section>
-
+                            </div>
                         
                         {/* Progressão */}
                         <section>
@@ -272,46 +289,55 @@ export default function CreateCharacter() {
                                 Atributos
                             </h2>
 
-                            <div className="grid grid-cols-5 gap-4">
+                            <div className="relative w-full max-w-150 h-auto">
+                                <img src={atributos_img} alt="Atributos" className="w-full h-auto"/>
 
                                 <input 
                                     name="atrib_agility" 
                                     type="number"
-                                    placeholder="Agilidade" 
+                                    defaultValue={1}                                    
                                     onChange={handleChange} 
-                                    className="input"
+                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                    style={{top: "14%", left: "41.8%"}}
                                 />
 
                                 <input 
                                     name="atrib_intellect" 
                                     type="number"
-                                    placeholder="Intelecto" 
+                                    defaultValue={1}
                                     onChange={handleChange} 
-                                    className="input"
+                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                    style={{top: "36%", left: "72%"}}
                                 />
 
                                 <input 
                                     name="atrib_vitallity" 
                                     type="number"
-                                    placeholder="Vigor" 
+                                    defaultValue={1}
                                     onChange={handleChange} 
-                                    className="input"
+                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                    style={{top: "75%", left: "64.5%"}}
                                 />
 
                                 <input 
                                     name="atrib_presence" 
                                     type="number"
-                                    placeholder="Presença" 
+                                    defaultValue={1}
                                     onChange={handleChange} 
-                                    className="input"
+                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                    style={{top: "75%", left: "19%"}}
                                 />
 
                                 <input 
                                     name="atrib_strength" 
                                     type="number"
-                                    placeholder="Força" 
+                                    defaultValue={1}
                                     onChange={handleChange} 
-                                    className="input"
+                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                    style={{
+                                        top: "36%", 
+                                        left: "10%",
+                                    }}                                    
                                 />
 
                             </div>
