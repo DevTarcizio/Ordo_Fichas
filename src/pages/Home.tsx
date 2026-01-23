@@ -1,24 +1,16 @@
 //import logo from '../assets/logo_ordo.png'
 import logo_glow from '../assets/logo_ordo_glow.png'
-import background_image from '../assets/background.png'
 import { useState } from 'react'
 import AuthModal from '../components/AuthModal'
+import MainLayout from '../components/MainLayout'
 
 export default function Home(){
     const [authMode, setAuthMode] = useState<"login" | "register" | null>(null)
 
     return (
-        <div className="relative min-h-screen overflow-hidden text-white">
-             
-            {/* Background */}
-            <img src={background_image} alt="Background" className="absolute inset-0 w-full h-full object-cover"/>
+        <MainLayout>
+            <div className="flex flex-col items-center justify-center min-h-screen px-6">
 
-            {/* Overlay */}
-            <div className="absolute inset-0 bg-black/50" />
-
-            {/* Conteudo */}
-            <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-6">
-                
                 <img src={logo_glow} alt="Ordo Praesidium" className="w-[70vw] md:w-137.5 -mt-10 mb-6 animate-fade-up"/>
 
                 <p className="font-smalltitle text-zinc-200 -mt-4 mb-8 max-w-md text-center">
@@ -46,9 +38,9 @@ export default function Home(){
                     mode={authMode ?? "login"}
                     onClose={() => setAuthMode(null)}
                 />
-            </div>
-            
 
-        </div>
+            </div>
+
+        </MainLayout>
     )
 }

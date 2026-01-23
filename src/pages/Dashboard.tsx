@@ -3,7 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api } from "../services/api";
-import background_image from "../assets/background.png"
+import MainLayout from "../components/MainLayout";
 
 interface Character {
     id: number
@@ -43,7 +43,7 @@ export default function Dashboard() {
     function renderPlayerDashboard(): JSX.Element {
         return (
 
-        <div className="w-full flex flex-col gap-6">
+        <div className="w-full px-4 md:px-8 flex flex-col gap-6">
                 
             <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full mb-8">
                 <h2 className="text-2xl text-blue-500 font-bigtitle mb-4">Personagens</h2>
@@ -55,9 +55,9 @@ export default function Dashboard() {
                             Não existem personagens criados
                         </p>
                     ) : (
-                        characters.map(char => (
+                        characters.map((char, index) => (
                             <div
-                                key={char.id}
+                                key={char.id ?? index}
                                 className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-1 w-full"
                             >
                                 <h3 className="text-blue-400 font-smalltitle text-lg">
@@ -112,42 +112,32 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="relative min-h-screen overflow-hidden text-white">
-             
-            {/* Background */}
-            <img src={background_image} alt="Background" className="absolute inset-0 w-full h-full object-cover"/>
-
-            {/* Overlay */}
-            <div className="absolute inset-0 bg-black/50" />
-
-            {/* Conteudo */}
-            <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-6">
+        <MainLayout>
                 
-                <div className="w-full flex justify-between items-center p-6">
-                    
-                    <div>
-                        <h1 className="text-4xl font-bigtitle">Dashboard</h1>
-                        <p>Bem-vindo, <span className="font-text">{user.email}</span>!</p>
-                    </div>
-
-                    {/* Botão de logout*/}
-                    <button
-                        onClick={() => {
-                            logout()
-                            navigate("/login")
-                        }}
-                        className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-700 transition"
-                    >
-                        Sair
-                    </button>
-                </div>   
-                        
-                <div className="flex flex-1 justify-start items-start w-full">
-                    {user.role === "master" ? renderMasterDashboard() : renderPlayerDashboard()}
+            <div className="w-full flex justify-between items-center p-6">
+                
+                <div>
+                    <h1 className="text-4xl font-bigtitle">Dashboard</h1>
+                    <p>Bem-vindo, <span className="font-text">{user.email}</span>!</p>
                 </div>
 
-            </div>      
-        </div>      
+                {/* Botão de logout*/}
+                <button
+                    onClick={() => {
+                        logout()
+                        navigate("/login")
+                    }}
+                    className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-700 transition"
+                >
+                    Sair
+                </button>
+            </div>   
+                        
+            <div className="flex flex-1 justify-start items-start w-full">
+                {user.role === "master" ? renderMasterDashboard() : renderPlayerDashboard()}
+            </div>
+
+        </MainLayout>      
 
         
     )
