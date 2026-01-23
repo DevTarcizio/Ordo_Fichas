@@ -6,6 +6,7 @@ import atributos_img from "../assets/atributos.png"
 
 export default function CreateCharacter() {
     const navigate = useNavigate()
+    const token = localStorage.getItem("token")
 
     const origins = [
         "Acadêmico", 
@@ -63,23 +64,23 @@ export default function CreateCharacter() {
         name: "",
         age: "",
 
-        nex_total: 0,
-        nex_class: 0,
-        nex_subclass: 0,
+        nex_total: "",
+        nex_class: "",
+        nex_subclass: "",
 
         origin: "",
         character_class: "",
         rank: "",
 
-        healthy_points: 0,
-        sanity_points: 0,
-        effort_points: 0,
+        healthy_points: "",
+        sanity_points: "",
+        effort_points: "",
 
-        atrib_agility: 0,
-        atrib_intellect: 0,
-        atrib_vitallity: 0,
-        atrib_presence: 0,
-        atrib_strength: 0
+        atrib_agility: 1,
+        atrib_intellect: 1,
+        atrib_vitallity: 1,
+        atrib_presence: 1,
+        atrib_strength: 1
     })
 
     function handleChange(
@@ -113,7 +114,13 @@ export default function CreateCharacter() {
                 vitallity: Number(form.atrib_vitallity),
                 presence: Number(form.atrib_presence),
                 strength: Number(form.atrib_strength),
-            })
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            }
+            )
 
             navigate("/dashboard/")
         } catch (err) {
@@ -140,209 +147,223 @@ export default function CreateCharacter() {
                     {/* Body do Card */}
                     <div className="bg-zinc-800 p-6 flex flex-col gap-6">
 
-                        {/* Inputs Principais */}
-                        {/* Primeira Linha */}
-                        <div className="flex w-full gap-4">
-
+                        {/* Container com as duas colunas */}
+                        <div className="flex w-full gap-6">
                             
-                            <div className="flex-2 min-w-50"> 
-                                
-                                <FloatingInput 
-                                    label="Nome"
-                                    name="name"
-                                    value={form.name}
-                                    onChange={handleChange}
-                                    />
+                            {/* Coluna 1 - Inputs Principais */}
+                            <div className="flex-1 flex flex-col gap-4">
+
+                                <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
+                                    Detalhes Principais
+                                </h2>
+
+                                {/* Primeira Linha */}
+                                <div className="flex w-full gap-4">
+
+                                    
+                                    <div className="flex-2 min-w-50"> 
+                                        
+                                        <FloatingInput 
+                                            label="Nome"
+                                            name="name"
+                                            value={form.name}
+                                            onChange={handleChange}
+                                            />
+
+                                    </div>
+
+                                    <div className="flex-1 min-w-25">
+
+                                        <FloatingInput 
+                                            label="Idade"
+                                            type="number"
+                                            name="age"
+                                            value={form.age}
+                                            onChange={handleChange}
+                                        />
+
+                                    </div>
+
+                                </div>
+
+                                {/* Segunda Linha */}
+                                <div className="flex w-full gap-4 mt-2">
+                                    <div className="flex-1 min-w-30">
+
+                                        <FloatingSelect 
+                                            label="Origem"
+                                            name="origin"
+                                            value={form.origin}
+                                            onChange={handleChange}
+                                            options={origins}
+                                        />
+
+                                    </div>
+
+                                    <div className="flex-1 min-w-30">
+
+                                        <FloatingSelect 
+                                            label="Classe"
+                                            name="character_class"
+                                            value={form.character_class}
+                                            onChange={handleChange}
+                                            options={classes}
+                                        />
+
+                                    </div>
+
+                                    <div className="flex-1 min-w-30">
+
+                                        <FloatingSelect 
+                                            label="Patente"
+                                            name="rank"
+                                            value={form.rank}
+                                            onChange={handleChange}
+                                            options={ranks}
+                                        />
+
+                                    </div>
+                                </div>
+
+                                {/* Terceira Linha */}
+                                <div className="flex w-full gap-4 mt-2">
+                                    
+                                    <div>
+                                        <div className="grid grid-cols-3 gap-4">
+                    
+                                                <FloatingInput 
+                                                    label="Nex Total"
+                                                    name="nex_total" 
+                                                    type="number"
+                                                    value={form.nex_total} 
+                                                    onChange={handleChange}
+                                                />
+                    
+                                                <FloatingInput 
+                                                    label="Nex da Classe"
+                                                    name="nex_class" 
+                                                    type="number"
+                                                    value={form.nex_class} 
+                                                    onChange={handleChange}
+                                                />
+                    
+                                                <FloatingInput
+                                                    label="Nex da Sub-Classe"
+                                                    name="nex_subclass" 
+                                                    type="number"
+                                                    value={form.nex_subclass}
+                                                    onChange={handleChange}
+                                                />
+                    
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                {/* Quarta Linha */}
+                                <div className="flex w-full gap-4 mt-2">
+                                    <div>
+                                        <div className="grid grid-cols-3 gap-4">
+                                            
+                                            <FloatingInput
+                                                label="Pontos de Vida" 
+                                                name="healthy_points" 
+                                                type="number"
+                                                value={form.healthy_points}
+                                                onChange={handleChange}
+                                            />
+                                            
+                                            <FloatingInput
+                                                label="Pontos de Sanidade" 
+                                                name="sanity_points" 
+                                                type="number"
+                                                value={form.sanity_points}
+                                                onChange={handleChange}
+                                            />
+                                            
+                                            <FloatingInput
+                                                label="Pontos de Esforço" 
+                                                name="effort_points" 
+                                                type="number"
+                                                value={form.effort_points}
+                                                onChange={handleChange}
+                                            />
+                                            
+                                        </div>
+                                            
+                                    </div>
+
+                                </div>
 
                             </div>
 
-                            <div className="flex-1 min-w-25">
+                            {/* Coluna 2 - Atributos */}
+                            <div className="flex-1">
 
-                                <FloatingInput 
-                                    label="Idade"
-                                    type="number"
-                                    name="age"
-                                    value={form.age}
-                                    onChange={handleChange}
-                                />
+                                <div>
+
+                                    <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
+                                        Atributos
+                                    </h2>
+
+                                    <div className="relative w-full flex justify-center">
+                                        <img src={atributos_img} alt="Atributos" className="w-100 h-auto -mt-9"/>
+
+                                        <input 
+                                            name="atrib_agility" 
+                                            type="number"
+                                            value={form.atrib_agility}
+                                            onChange={handleChange} 
+                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                            style={{top: "2%", left: "40.4%"}}
+                                        />
+
+                                        <input 
+                                            name="atrib_intellect" 
+                                            type="number"
+                                            value={form.atrib_intellect} 
+                                            onChange={handleChange} 
+                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                            style={{top: "26%", left: "66.5%"}}
+                                        />
+
+                                        <input 
+                                            name="atrib_vitallity" 
+                                            type="number"
+                                            value={form.atrib_vitallity} 
+                                            onChange={handleChange} 
+                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                            style={{top: "69%", left: "59.5%"}}
+                                        />
+
+                                        <input 
+                                            name="atrib_presence" 
+                                            type="number"
+                                            value={form.atrib_presence} 
+                                            onChange={handleChange} 
+                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                            style={{top: "69%", left: "21.5%"}}
+                                        />
+
+                                        <input 
+                                            name="atrib_strength" 
+                                            type="number"
+                                            value={form.atrib_strength} 
+                                            onChange={handleChange} 
+                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
+                                            style={{top: "26%", left: "13.5%"}}                                    
+                                        />
+
+                                    </div>
+
+                                </div>
 
                             </div>
-
                         </div>
 
-                        {/* Segunda Linha */}
-                        <div className="flex w-full gap-4 mt-2">
-                            <div className="flex-1 min-w-30">
-
-                                <FloatingSelect 
-                                    label="Origem"
-                                    name="origin"
-                                    value={form.origin}
-                                    onChange={handleChange}
-                                    options={origins}
-                                />
-
-                            </div>
-
-                            <div className="flex-1 min-w-30">
-
-                                <FloatingSelect 
-                                    label="Classe"
-                                    name="character_class"
-                                    value={form.character_class}
-                                    onChange={handleChange}
-                                    options={classes}
-                                />
-
-                            </div>
-
-                            <div className="flex-1 min-w-30">
-
-                                <FloatingSelect 
-                                    label="Patente"
-                                    name="rank"
-                                    value={form.rank}
-                                    onChange={handleChange}
-                                    options={ranks}
-                                />
-
-                            </div>
-                            </div>
                         
-                        {/* Progressão */}
-                        <section>
-
-                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                                Progressão
-                            </h2>
-
-                            <div className="grid grid-cols-3 gap-4">
-
-                                <FloatingInput 
-                                    label="Nex Total"
-                                    name="nex_total" 
-                                    type="number"
-                                    value={form.nex_total} 
-                                    onChange={handleChange}
-                                />
-
-                                <FloatingInput 
-                                    label="Nex da Classe"
-                                    name="nex_class" 
-                                    type="number"
-                                    value={form.nex_class} 
-                                    onChange={handleChange}
-                                />
-
-                                <FloatingInput
-                                    label="Nex da Sub-Classe"
-                                    name="nex_subclass" 
-                                    type="number"
-                                    value={form.nex_subclass}
-                                    onChange={handleChange}
-                                />
-
-                            </div>
-                        </section>
-
                         {/* Recursos */}
-                        <section>
 
-                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                                Recursos
-                            </h2>
-
-                            <div className="grid grid-cols-3 gap-4">
-
-                                <FloatingInput
-                                    label="Pontos de Vida" 
-                                    name="healthy_points" 
-                                    type="number"
-                                    value={form.healthy_points}
-                                    onChange={handleChange}
-                                />
-
-                                <FloatingInput
-                                    label="Pontos de Sanidade" 
-                                    name="sanity_points" 
-                                    type="number"
-                                    value={form.sanity_points}
-                                    onChange={handleChange}
-                                />
-
-                                <FloatingInput
-                                    label="Pontos de Esforço" 
-                                    name="effort_points" 
-                                    type="number"
-                                    value={form.effort_points}
-                                    onChange={handleChange}
-                                />
-
-                            </div>
-
-                        </section>
-
-                        {/* Atributos */}
-                        <section>
-
-                            <h2 className="text-xl font-smalltitle text-blue-400 mb-2">
-                                Atributos
-                            </h2>
-
-                            <div className="relative w-full max-w-150 h-auto">
-                                <img src={atributos_img} alt="Atributos" className="w-full h-auto"/>
-
-                                <input 
-                                    name="atrib_agility" 
-                                    type="number"
-                                    defaultValue={1}                                    
-                                    onChange={handleChange} 
-                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                    style={{top: "14%", left: "41.8%"}}
-                                />
-
-                                <input 
-                                    name="atrib_intellect" 
-                                    type="number"
-                                    defaultValue={1}
-                                    onChange={handleChange} 
-                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                    style={{top: "36%", left: "72%"}}
-                                />
-
-                                <input 
-                                    name="atrib_vitallity" 
-                                    type="number"
-                                    defaultValue={1}
-                                    onChange={handleChange} 
-                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                    style={{top: "75%", left: "64.5%"}}
-                                />
-
-                                <input 
-                                    name="atrib_presence" 
-                                    type="number"
-                                    defaultValue={1}
-                                    onChange={handleChange} 
-                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                    style={{top: "75%", left: "19%"}}
-                                />
-
-                                <input 
-                                    name="atrib_strength" 
-                                    type="number"
-                                    defaultValue={1}
-                                    onChange={handleChange} 
-                                    className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                    style={{
-                                        top: "36%", 
-                                        left: "10%",
-                                    }}                                    
-                                />
-
-                            </div>
-
-                        </section>
 
                         <div className="flex justify-end gap-4 mt-4">
                             <button

@@ -40,6 +40,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return null
     })
 
+    useEffect(() => {
+        const storedToken = localStorage.getItem("token")
+        if (storedToken) {
+            try {
+                const decoded: any = jwtDecode(storedToken)
+                if (decoded.sub && decoded.role) {
+                    setUser({ email: decoded.sub, role: decoded.role })
+                    setToken(storedToken)
+                } else {
+                    throw new Error("Token inválido")
+                }
+            } catch {
+                localStorage.removeItem("token")
+                setUser(null)
+                setToken(null)
+            }
+        }
+    }, [])
+
+
     function login(newToken: string) {
         localStorage.setItem("token", newToken)
         setToken(newToken)
