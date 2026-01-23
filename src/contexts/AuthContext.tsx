@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import { jwtDecode } from "jwt-decode";
+import { createContext, useContext, useEffect, useState } from "react"
+import { jwtDecode } from "jwt-decode"
 
 type User = {
     email: string
@@ -16,48 +16,41 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType)
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [user, setUser] = useState<User | null>(null)
-    const [token, setToken] = useState<string | null>(null)
-
-    useEffect(() => {
-        const storedToken = localStorage.getItem("token")
-        if (storedToken){
-            setToken(storedToken)
-            try {
-                const decoded: any = jwtDecode(storedToken)
-                if (decoded.sub && decoded.role){
-                    setUser({email: decoded.sub, role: decoded.role})
-                } else {
-                    throw new Error("token inválido: falta sub ou role")
-                }
-            } catch (err) {
-                console.error("token inválido no useEffect", err)
-                localStorage.removeItem("token")
-                setUser(null)
-            }
-        }
-    }, [])
-
-    function login(token: string) {
-        localStorage.setItem("token", token)
-        setToken(token)
+function decodeToken(token: string): User | null {
         try {
             const decoded: any = jwtDecode(token)
             if (decoded.sub && decoded.role) {
-                setUser({email: decoded.sub, role: decoded.role})
+                return {email: decoded.sub, role: decoded.role}
             } else {
                 throw new Error("token inválido: falta sub ou role")
             }
         } catch (err) {
             console.error("token inválido no useEffect", err)
             localStorage.removeItem("token")
-            setUser(null)
+            return null
         }
+    }
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+    const storedToken = localStorage.getItem("token")
+
+    const [token, setToken] = useState<string | null>(storedToken)
+    const [user, setUser] = useState<User | null>(() => {
+        if (storedToken) return decodeToken(storedToken)
+        return null
+    })
+
+    function login(newToken: string) {
+        localStorage.setItem("token", newToken)
+        setToken(newToken)
+
+        const decodedUser = decodeToken(newToken)
+        setUser(decodedUser)
     }
 
     function logout() {
         localStorage.removeItem("token")
+        setToken(null)
         setUser(null)
     }
 
