@@ -1,27 +1,91 @@
 import type { JSX } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { api } from "../services/api";
 import background_image from "../assets/background.png"
+
+interface Character {
+    id: number
+    name: string
+    age: number
+    character_class: string
+    rank: string
+    origin: string
+}
+
 
 export default function Dashboard() {
     const { user, logout } = useAuth()
     const navigate = useNavigate()
+    const [characters, setCharacters] = useState<Character[]>([])
 
     if (!user) {
         navigate("/")
         return null
     }
 
+    useEffect(() => {
+        async function getCharacters() {
+            try {
+                if (!user) return
+                
+                const response = await api.get("/characters/list")
+                setCharacters(response.data.characters) 
+            } catch (err) {
+                console.error("Erro ao buscar personagens: ", err)
+            }
+        }
+
+        getCharacters()
+    }, [])
+
     function renderPlayerDashboard(): JSX.Element {
         return (
 
-            <div className="w-full flex flex-col gap-6">
+        <div className="w-full flex flex-col gap-6">
                 
-            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full max-w-4xl">
+            <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full mb-8">
                 <h2 className="text-2xl text-blue-500 font-bigtitle mb-4">Personagens</h2>
 
+                {/* Lista de Personagens */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 w-full">
+                    {characters.length === 0 ?(
+                        <p className="text-zinc-300 font-text">
+                            Não existem personagens criados
+                        </p>
+                    ) : (
+                        characters.map(char => (
+                            <div
+                                key={char.id}
+                                className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-1 w-full"
+                            >
+                                <h3 className="text-blue-400 font-smalltitle text-lg">
+                                    {char.name}
+                                </h3>
+                                <p className="text-zinc-300 font-text">
+                                    Classe: {char.character_class}
+                                </p>
+                                <p className="text-zinc-300 font-text">
+                                    Patente: {char.rank}
+                                </p>
+                                <p className="text-zinc-300 font-text">
+                                    Origem: {char.origin}
+                                </p>
+                                <p className="text-zinc-300 font-text">
+                                    Idade: {char.age}
+                                </p>
+
+
+                            </div>
+                        ))
+                    )}
+
+                </div>
+
+
                 {/* Card Criar Personagem */}
-                <div className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-3">
+                <div className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-3 w-full">
                     <h3 className="text-blue-400 text-xl font-smalltitle">Criar Personagem</h3>
                     <p className="text-zinc-300 font-text">
                         Crie seu personagem e comece sua aventura!
@@ -34,20 +98,10 @@ export default function Dashboard() {
                     </button>
                 </div>
 
-                {/* Lista de Personagens */}
-                <div className="flex flex-col gap-3 mt-4">
-                    <div className="bg-zinc-800 border border-zinc-600 rounded-lg p-4">
-                        <p className="text-white font-text">personagem 1</p>
-                    </div>
-                    
-                    <div className="bg-zinc-800 border border-zinc-600 rounded-lg p-4">
-                        <p className="text-white font-text">personagem 2</p>
-                    </div>
-                </div>
-
+                
             </div>
 
-            </div>
+        </div>
         )
     }
 
@@ -88,7 +142,7 @@ export default function Dashboard() {
                     </button>
                 </div>   
                         
-                <div className="flex flex-1 justify-center items-center">
+                <div className="flex flex-1 justify-start items-start w-full">
                     {user.role === "master" ? renderMasterDashboard() : renderPlayerDashboard()}
                 </div>
 
