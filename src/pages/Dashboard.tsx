@@ -91,6 +91,12 @@ export default function Dashboard() {
                                     Idade: {char.age}
                                 </p>
 
+                                <button
+                                    className="mt-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded text-white font-smalltitle transition"
+                                    onClick={() => {navigate(`/characters/${char.id}`)}}
+                                >
+                                    Ver Ficha
+                                </button>
 
                             </div>
                         ))
