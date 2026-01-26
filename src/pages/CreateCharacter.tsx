@@ -4,60 +4,68 @@ import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import atributos_img from "../assets/atributos.png"
 
+function formatEnum(value: string): string {
+    if (!value) return ""
+    return value
+        .split("_")
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ")
+}
+
 export default function CreateCharacter() {
     const navigate = useNavigate()
     const token = localStorage.getItem("token")
 
     const origins = [
-        "Acadêmico", 
-        "Agente de Saúde",
-        "Amnésico",
-        "Artista",
-        "Atleta",
-        "Chef",
-        "Cientista Forense",
-        "Criminoso",
-        "Cultista Arrependido",
-        "Desgarrado",
-        "Engenheiro",
-        "Executivo",
-        "Escritor",
-        "Investigador",
-        "Jornalista",
-        "Lutador",
-        "Magnata",
-        "Mercenário",
-        "Militar",
-        "Operário",
-        "Policial",
-        "Professor",
-        "Religioso",
-        "Servidor Público",
-        "Teórico da Conspiração",
-        "TI",
-        "Trabalhador Rural",
-        "Trambiqueiro",
-        "Universitário",
-        "Vítima",
-        "Prodígio Paranormal",
-        "Oficial Militar"
+        "academico",
+        "agente_de_saude",
+        "amnesico",
+        "artista",
+        "atleta",
+        "chef",
+        "cientista_forense",
+        "criminoso",
+        "cultista_arrependido",
+        "desgarrado",
+        "engenheiro",
+        "executivo",
+        "escritor",
+        "investigador",
+        "jornalista",
+        "lutador",
+        "magnata",
+        "mercenario",
+        "militar",
+        "operario",
+        "policial",
+        "professor",
+        "religioso",
+        "servidor_publico",
+        "teorico_da_conspiracao",
+        "ti",
+        "trabalhador_rural",
+        "trambiqueiro",
+        "universitario",
+        "vitima",
+        "prodigio_paranormal",
+        "oficial_militar"
     ]
 
     const classes = [
-        "Mundano",
-        "Combatente",
-        "Especialista",
-        "Ocultista",
-        "Transformado"
+        "mundano",
+        "combatente",
+        "especialista",
+        "ocultista",
+        "transformado"
     ]
 
     const ranks = [
         "Nenhum",
-        "Recruta",
-        "Operador",
-        "Agente Especial",
-        "Oficial de Operações",
-        "Agente de Elite"
+        "recruta",
+        "operador",
+        "agente_especial",
+        "oficial_de_operacoes",
+        "agente_de_elite"
     ]
 
     const [form, setForm] = useState({
@@ -195,7 +203,10 @@ export default function CreateCharacter() {
                                             name="origin"
                                             value={form.origin}
                                             onChange={handleChange}
-                                            options={origins}
+                                            options={origins.map(origin => ({
+                                                value: origin,
+                                                label: formatEnum(origin)
+                                            }))}
                                         />
 
                                     </div>
@@ -207,7 +218,10 @@ export default function CreateCharacter() {
                                             name="character_class"
                                             value={form.character_class}
                                             onChange={handleChange}
-                                            options={classes}
+                                            options={classes.map(character_class => ({
+                                                value: character_class,
+                                                label: formatEnum(character_class)
+                                            }))}
                                         />
 
                                     </div>
@@ -219,7 +233,10 @@ export default function CreateCharacter() {
                                             name="rank"
                                             value={form.rank}
                                             onChange={handleChange}
-                                            options={ranks}
+                                            options={ranks.map(rank => ({
+                                                value: rank,
+                                                label: formatEnum(rank)
+                                            }))}
                                         />
 
                                     </div>
@@ -423,7 +440,7 @@ interface FloatingSelectProps {
     label: string
     name: string
     value: string
-    options: string[]
+    options: { value: string, label: string }[]
     onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void
 }
 
@@ -439,7 +456,7 @@ function FloatingSelect({ label, name, value, options, onChange }: FloatingSelec
             >
                 <option value="" disabled hidden></option>
                 {options.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
             </select>
             <label 

@@ -5,6 +5,14 @@ import { useEffect, useState } from "react";
 import { api } from "../services/api";
 import MainLayout from "../components/MainLayout";
 
+function formatEnum(value: string): string {
+    if (!value) return ""
+    return value
+        .split("_")
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" ")
+}
+
 interface Character {
     id: number
     name: string
@@ -31,7 +39,14 @@ export default function Dashboard() {
                 if (!user) return
                 
                 const response = await api.get("/characters/list")
-                setCharacters(response.data.characters) 
+                const formattedCharacters = response.data.characters.map((char: Character) => ({
+                    ...char,
+                    origin: formatEnum(char.origin),
+                    character_class: formatEnum(char.character_class),
+                    rank: formatEnum(char.rank)
+                }))
+
+                setCharacters(formattedCharacters) 
             } catch (err) {
                 console.error("Erro ao buscar personagens: ", err)
             }
