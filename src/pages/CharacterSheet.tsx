@@ -2,6 +2,8 @@ import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
+import StatusBar from "../components/StatusBar"
+import { Heart, Brain, Zap } from "lucide-react"
 
 interface Character {
     id: number
@@ -16,8 +18,11 @@ interface Character {
     nex_class: number
     nex_subclass: number
     healthy_points: number
+    healthy_max: number
     sanity_points: number
+    sanity_max: number
     effort_points: number
+    effort_max: number
     atrib_agility: number
     atrib_intellect: number
     atrib_vitallity: number
@@ -62,6 +67,24 @@ export default function CharacterSheet() {
 
         fetchCharacter()
     }, [id, token])
+
+    async function updateStatus(
+        field: "healthy_points" | "sanity_points" | "effort_points",
+        newValue: number
+    ) {
+        try {
+            await api.patch(
+                `/characters/${character!.id}`,
+                { [field]: newValue },
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+        } catch (err) {
+            console.log(err)
+            alert("Erro ao atualizar dados do servidor")
+        }
+    }
 
     if (!character) {
         return (
@@ -113,23 +136,87 @@ export default function CharacterSheet() {
 
 
                         {/* Aba Principal */}
-                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col items-center gap-4">
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">
                             <h2 className="text-blue-400 font-smalltitle">
                                 Status
                             </h2>
-                            <div className="w-full flex justify-around text-center">
-                                <div>
-                                    <p className="text-sm font-text text-zinc-400">Vida</p>
-                                    <p className="text-xl font-text">{character.healthy_points}</p>
-                                </div>
-                                <div>
-                                    <p className="text-sm font-text text-zinc-400">Sanidade</p>
-                                    <p className="text-xl font-text">{character.sanity_points}</p>
-                                </div>
-                                <div>
-                                    <p className="text-sm font-text text-zinc-400">Esforço</p>
-                                    <p className="text-xl font-text">{character.effort_points}</p>
-                                </div>
+                            <div className="flex flex-col gap-3">
+                           
+                                <StatusBar 
+                                    label="Vida"
+                                    icon={Heart}
+                                    current={character.healthy_points}
+                                    max={character.healthy_max}
+                                    gradient="bg-gradient-to-r from-red-700 to-red-500"
+                                    onChange={(delta) => {
+                                        setCharacter(prev => {
+                                            if (!prev) return prev
+
+                                            const newValue = Math.min(
+                                                prev.healthy_max,
+                                                Math.max(0, prev.healthy_points + delta)
+                                            )
+
+                                            updateStatus("healthy_points", newValue)
+
+                                            return {
+                                                ...prev,
+                                                healthy_points: newValue
+                                            }
+                                        })
+                                    }}
+                                /> 
+
+                                <StatusBar 
+                                    label="Sanidade"
+                                    icon={Brain}
+                                    current={character.sanity_points}
+                                    max={character.sanity_max}
+                                    gradient="bg-gradient-to-r from-blue-700 to-blue-500"
+                                    onChange={(delta) => {
+                                        setCharacter(prev => {
+                                            if (!prev) return prev
+
+                                            const newValue = Math.min(
+                                                prev.sanity_max,
+                                                Math.max(0, prev.sanity_points + delta)
+                                            )
+
+                                            updateStatus("sanity_points", newValue)
+
+                                            return {
+                                                ...prev,
+                                                sanity_points: newValue
+                                            }
+                                        })
+                                    }}
+                                /> 
+
+                                <StatusBar 
+                                    label="Esforço"
+                                    icon={Zap}
+                                    current={character.effort_points}
+                                    max={character.effort_max}
+                                    gradient="bg-gradient-to-r from-yellow-700 to-yellow-500"
+                                    onChange={(delta) => {
+                                        setCharacter(prev => {
+                                            if (!prev) return prev
+
+                                            const newValue = Math.min(
+                                                prev.effort_max,
+                                                Math.max(0, prev.effort_points + delta)
+                                            )
+
+                                            updateStatus("effort_points", newValue)
+
+                                            return {
+                                                ...prev,
+                                                effort_points: newValue
+                                            }
+                                        })
+                                    }}
+                                />     
+                            
                             </div>
                         </div>
 

@@ -108,8 +108,11 @@ export default function CreateCharacter() {
         subclass: "",
 
         healthy_points: "",
+        healthy_max: "",
         sanity_points: "",
+        sanity_max: "",
         effort_points: "",
+        effort_max: "",
 
         atrib_agility: 1,
         atrib_intellect: 1,
@@ -141,8 +144,11 @@ export default function CreateCharacter() {
                 nex_subclass: Number(form.nex_subclass),
                 
                 healthy_points: Number(form.healthy_points),
+                healthy_max: Number(form.healthy_points),
                 sanity_points: Number(form.sanity_points),
+                sanity_max: Number(form.sanity_points),
                 effort_points: Number(form.effort_points),
+                effort_max: Number(form.effort_points),
 
                 agility: Number(form.atrib_agility),
                 intellect: Number(form.atrib_intellect),
@@ -303,7 +309,7 @@ export default function CreateCharacter() {
                                 </div>
 
 
-                                {/* Terceira Linha */}
+                                {/* Quarta Linha */}
                                 <div className="flex w-full gap-4 mt-2">
                                     
                                     <div>
@@ -338,7 +344,7 @@ export default function CreateCharacter() {
 
                                 </div>
 
-                                {/* Quarta Linha */}
+                                {/* Quinta Linha */}
                                 <div className="flex w-full gap-4 mt-2">
                                     <div>
                                         <div className="grid grid-cols-3 gap-4">
