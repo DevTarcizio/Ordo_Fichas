@@ -15,7 +15,8 @@ function formatEnum(value: string): string {
 export default function CreateCharacter() {
     const navigate = useNavigate()
     const token = localStorage.getItem("token")
-
+    
+    
     const origins = [
         "academico",
         "agente_de_saude",
@@ -121,6 +122,7 @@ export default function CreateCharacter() {
         atrib_strength: 1
     })
 
+
     function handleChange(
         e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
     ) {
@@ -155,6 +157,7 @@ export default function CreateCharacter() {
                 vitallity: Number(form.atrib_vitallity),
                 presence: Number(form.atrib_presence),
                 strength: Number(form.atrib_strength),
+
             },
             {
                 headers: {
@@ -224,7 +227,6 @@ export default function CreateCharacter() {
                                         />
 
                                     </div>
-
                                 </div>
 
                                 {/* Segunda Linha */}

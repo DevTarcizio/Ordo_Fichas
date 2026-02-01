@@ -4,6 +4,7 @@ import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
 import { Heart, Brain, Zap } from "lucide-react"
+import formatEnum from "../utils"
 
 interface Character {
     id: number
@@ -30,13 +31,8 @@ interface Character {
     atrib_strength: number
 }
 
-function formatEnum(value: string): string {
-    if (!value) return ""
-    return value
-        .split("_")
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" ")
-}
+
+
 
 export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
@@ -44,19 +40,23 @@ export default function CharacterSheet() {
     const [character, setCharacter] = useState<Character | null>(null)
     const token = localStorage.getItem("token")
 
+
     useEffect(() => {
         const fetchCharacter = async () => {
             try {
                 const response = await api.get(`/characters/${id}`, {
                     headers: { Authorization: `Bearer ${token}`}
                 })
+
+                console.log(response.data)
+
                 const formattedCharacters = {
                     ...response.data,
                     origin: formatEnum(response.data.origin),
                     character_class: formatEnum(response.data.character_class),
                     rank: formatEnum(response.data.rank),
                     subclass: formatEnum(response.data.subclass),
-                    trail: formatEnum(response.data.trail)
+                    trail: formatEnum(response.data.trail),
                 }
                 setCharacter(formattedCharacters)
             } catch (err) {
@@ -136,7 +136,8 @@ export default function CharacterSheet() {
 
 
                         {/* Aba Principal */}
-                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">     
+                            
                             <h2 className="text-blue-400 font-smalltitle">
                                 Status
                             </h2>
