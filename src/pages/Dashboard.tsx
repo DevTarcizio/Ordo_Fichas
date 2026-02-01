@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { Trash2 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
@@ -55,6 +56,19 @@ export default function Dashboard() {
         getCharacters()
     }, [])
 
+    async function handleDeleteCharacter(id: number) {
+        const confirmDelete =  window.confirm("Tem certeza que deseja excluir esse personagem?")
+        if (!confirmDelete) return
+
+        try {
+            await api.delete(`/characters/${id}`)
+            setCharacters(prev => prev.filter(char => char.id !== id))
+        } catch (err) {
+            console.log(err)
+            alert("Erro ao excluir personagem")
+        }
+    }
+
     function renderPlayerDashboard(): JSX.Element {
         return (
 
@@ -74,10 +88,22 @@ export default function Dashboard() {
                             <div
                                 key={char.id ?? index}
                                 className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-1 w-full"
-                            >
-                                <h3 className="text-blue-400 font-smalltitle text-lg">
-                                    {char.name}
-                                </h3>
+                            >   
+                                <div className="flex justify-between items-center">
+                                    <h3 className="text-blue-400 font-smalltitle text-lg">
+                                        {char.name}
+                                    </h3>
+                                    {/* Botão de excluir */}
+                                    <button 
+                                        onClick={() => handleDeleteCharacter(char.id)}
+                                        className="w-8 h-8 flex items-center justify-center bg-red-500 hover:bg-red-600 transition text-white rounded"
+                                        title="Excluir personagem"
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                </div>
+
+                                
                                 <p className="text-zinc-300 font-text">
                                     Classe: {char.character_class}
                                 </p>

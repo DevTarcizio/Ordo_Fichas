@@ -59,6 +59,31 @@ export default function CreateCharacter() {
         "transformado"
     ]
 
+    const subclasses = [
+        "combatente",
+        "especialista",
+        "ocultista",
+    ]
+
+    const trails = [
+        "none",
+        "aniquilador",
+        "comandante_de_campo",
+        "guerreiro",
+        "operacoes_especiais",
+        "tropa_de_choque",
+        "atirador_de_elite",
+        "infiltrador",
+        "medico_de_campo",
+        "negociador",
+        "tecnico",
+        "conduite",
+        "flagelador",
+        "graduado",
+        "intuitivo",
+        "lamina_paranormal"
+    ]
+
     const ranks = [
         "Nenhum",
         "recruta",
@@ -79,6 +104,8 @@ export default function CreateCharacter() {
         origin: "",
         character_class: "",
         rank: "",
+        trail: "",
+        subclass: "",
 
         healthy_points: "",
         sanity_points: "",
@@ -241,6 +268,40 @@ export default function CreateCharacter() {
 
                                     </div>
                                 </div>
+
+                                {/* Terceira Linha */}
+                                <div className="flex w-full gap-4 mt-2">
+                                    <div className="flex-1 min-w-30">
+
+                                        <FloatingSelect 
+                                            label="Subclasse"
+                                            name="subclass"
+                                            value={form.subclass}
+                                            onChange={handleChange}
+                                            options={subclasses.map(subclass => ({
+                                                value: subclass,
+                                                label: formatEnum(subclass)
+                                            }))}
+                                        />
+
+                                    </div>
+
+                                    <div className="flex-1 min-w-30">
+
+                                        <FloatingSelect 
+                                            label="Trilha"
+                                            name="trail"
+                                            value={form.trail}
+                                            onChange={handleChange}
+                                            options={trails.map(trail => ({
+                                                value: trail,
+                                                label: formatEnum(trail)
+                                            }))}
+                                        />
+
+                                    </div>
+                                </div>
+
 
                                 {/* Terceira Linha */}
                                 <div className="flex w-full gap-4 mt-2">

@@ -10,6 +10,8 @@ interface Character {
     origin: string
     character_class: string
     rank: string
+    subclass: string
+    trail: string
     nex_total: number
     nex_class: number
     nex_subclass: number
@@ -47,7 +49,9 @@ export default function CharacterSheet() {
                     ...response.data,
                     origin: formatEnum(response.data.origin),
                     character_class: formatEnum(response.data.character_class),
-                    rank: formatEnum(response.data.rank)
+                    rank: formatEnum(response.data.rank),
+                    subclass: formatEnum(response.data.subclass),
+                    trail: formatEnum(response.data.trail)
                 }
                 setCharacter(formattedCharacters)
             } catch (err) {
@@ -72,7 +76,7 @@ export default function CharacterSheet() {
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
-                <div className="max-w-4xl mx-auto bg-zinc-800 border border-zinc-700 rounded-lg p-6 flex flex-col gap-6">
+                <div className="max-w-5xl mx-auto flex flex-col gap-6">
 
                     {/* Header */}
                     <div className="flex justify-between items-center">
@@ -87,15 +91,53 @@ export default function CharacterSheet() {
                          </button>
                     </div>
 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                        {/* Card informações */}
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4">
+                            <h2 className="text-blue-400 font-smalltitle mb-3">
+                                Informações Principais
+                            </h2>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div><strong>Idade:</strong> {character.age}</div>
+                                <div><strong>Origem:</strong> {character.origin}</div>
+                                <div><strong>Classe:</strong> {character.character_class}</div>
+                                <div><strong>Subclasse:</strong> {character.subclass}</div>
+                                <div><strong>Trilha:</strong> {character.trail}</div>
+                                <div><strong>Patente:</strong> {character.rank}</div>
+                                <div><strong>Nex Total:</strong> {character.nex_total}</div>
+                                <div><strong>Nex da Classe:</strong> {character.nex_class}</div>
+                                <div><strong>Nex da Sub-Classe:</strong> {character.nex_subclass}</div>
+                            </div>
+                        </div>
+
+
+                        {/* Aba Principal */}
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col items-center gap-4">
+                            <h2 className="text-blue-400 font-smalltitle">
+                                Status
+                            </h2>
+                            <div className="w-full flex justify-around text-center">
+                                <div>
+                                    <p className="text-sm font-text text-zinc-400">Vida</p>
+                                    <p className="text-xl font-text">{character.healthy_points}</p>
+                                </div>
+                                <div>
+                                    <p className="text-sm font-text text-zinc-400">Sanidade</p>
+                                    <p className="text-xl font-text">{character.sanity_points}</p>
+                                </div>
+                                <div>
+                                    <p className="text-sm font-text text-zinc-400">Esforço</p>
+                                    <p className="text-xl font-text">{character.effort_points}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
                     {/* Principal */}
                     <div className="bg-zinc-900 p-4 rounded grid grid-cols-2 gap-4">
-                        <div><strong>Idade:</strong> {character.age}</div>
-                        <div><strong>Origem:</strong> {character.origin}</div>
-                        <div><strong>Classe:</strong> {character.character_class}</div>
-                        <div><strong>Patente:</strong> {character.rank}</div>
-                        <div><strong>Nex Total:</strong> {character.nex_total}</div>
-                        <div><strong>Nex da Classe:</strong> {character.nex_class}</div>
-                        <div><strong>Nex da Sub-Classe:</strong> {character.nex_subclass}</div>
+                        
                     </div>
 
                     {/* Status */}
