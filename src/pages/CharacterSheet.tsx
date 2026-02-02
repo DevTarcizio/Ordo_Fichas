@@ -92,7 +92,30 @@ export default function CharacterSheet() {
         )
     }
 
-    const avatarSrc = `/avatars/${character.avatar}/${character.avatar}.png`
+    const getAvatarSrc = () => {
+        if (!character) return ""
+
+        const lifePercent = character.healthy_points / character.healthy_max
+        const sanityPercent = character.sanity_points / character.sanity_max
+
+        if (lifePercent <= 0.0 && sanityPercent <= 0.0) {
+            return `/avatars/${character.avatar}/${character.avatar}_dying_and_madness.png`
+        }
+        
+        if (sanityPercent <= 0.0) {
+            return `/avatars/${character.avatar}/${character.avatar}_madness.png`
+        }
+
+        if (lifePercent <= 0.0) {
+            return `/avatars/${character.avatar}/${character.avatar}_dying.png`
+        }
+
+        if (lifePercent <= 0.5 ) {
+            return `/avatars/${character.avatar}/${character.avatar}_hurt.png`
+        }
+
+        return `/avatars/${character.avatar}/${character.avatar}.png`
+    }
 
     return (
         <MainLayout>
@@ -140,7 +163,7 @@ export default function CharacterSheet() {
                             </h1>
 
                             <div className="flex justify-center">
-                                <img src={avatarSrc} alt={character.name} className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"/>
+                                <img src={getAvatarSrc()} alt={character.name} className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"/>
                             </div>
 
                             <div className="flex flex-col gap-3">
