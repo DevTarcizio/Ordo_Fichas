@@ -86,11 +86,11 @@ export default function AuthModal({ isOpen, onClose, mode}:Props) {
                 <form className="flex flex-col gap-4">
                     {!isLogin && (
                         <input
-                        type="text"
-                        placeholder="Username"
-                        className="input"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
+                            type="text"
+                            placeholder="Username"
+                            className="input"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
                         />
                     )}
 

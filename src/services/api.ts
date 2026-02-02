@@ -42,7 +42,7 @@ api.interceptors.response.use(
                 return api(error.config)
             } catch {
                 localStorage.removeItem("token")
-                window.location.href = "/login"
+                window.location.href = "/"
             }
         }
 

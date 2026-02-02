@@ -138,20 +138,64 @@ export default function CharacterSheet() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
 
                         {/* Card informações */}
-                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4">
-                            <h2 className="text-blue-400 font-smalltitle mb-3">
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md">
+                            <h1 className="text-blue-400 font-smalltitle mb-4 text-2xl">
                                 Informações Principais
-                            </h2>
-                            <div className="grid grid-cols-2 gap-2">
-                                <div><strong>Idade:</strong> {character.age}</div>
-                                <div><strong>Origem:</strong> {character.origin}</div>
-                                <div><strong>Classe:</strong> {character.character_class}</div>
-                                <div><strong>Subclasse:</strong> {character.subclass}</div>
-                                <div><strong>Trilha:</strong> {character.trail}</div>
-                                <div><strong>Patente:</strong> {character.rank}</div>
-                                <div><strong>Nex Total:</strong> {character.nex_total}</div>
-                                <div><strong>Nex da Classe:</strong> {character.nex_class}</div>
-                                <div><strong>Nex da Sub-Classe:</strong> {character.nex_subclass}</div>
+                            </h1>
+
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 text-sm font-text">Idade</span>
+                                    <span className="text-white font-text">{character.age}</span>
+                                </div>
+
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 text-sm font-text">Origem</span>
+                                    <span className="text-white font-text">{character.origin}</span>
+                                </div>
+
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 text-sm font-text">Classe</span>
+                                    <span className="text-white font-text">{character.character_class}</span>
+                                </div>
+                                
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 text-sm font-text">Subclasse</span>
+                                    <span className="text-white font-text">{character.subclass}</span>
+                                </div>
+
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 text-sm font-text">Trilha</span>
+                                    <span className="text-white font-text">{character.trail}</span>
+                                </div>
+
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 text-sm font-text">Patente</span>
+                                    <span className="text-white font-text">{character.rank}</span>
+                                </div>
+
+                                {/* Bloco NEX */}
+                                <div className="bg-zinc-900/70 p-6 rounded-lg flex flex-col gap-4 col-span-2 md:col-span-3 shadow-inner border border-zinc-700">
+                                    
+                                    {/* Total */}
+                                    <div className="flex justify-center items-center text-white text-2xl font-text mb-2">
+                                        <span className="text-zinc-300">Nex Total:</span>
+                                        <span className="text-white ml-2">{character.nex_total}%</span>
+                                    </div>
+
+                                    {/* Classe e Subclasse */}
+                                    <div className="flex justify-between gap-4">
+                                        <div className="flex flex-col items-center flex-1 bg-zinc-800/80 p-3 rounded">
+                                            <span className="text-zinc-300 text-xl font-text">Classe</span>
+                                            <span className="text-white text-xl font-text">{character.nex_class}%</span>
+                                        </div>
+                                        <div className="flex flex-col items-center flex-1 bg-zinc-800/80 p-3 rounded">
+                                            <span className="text-zinc-300 text-xl font-text">Subclasse</span>
+                                            <span className="text-white text-xl font-text">{character.nex_subclass}%</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

@@ -65,6 +65,7 @@ export default function CreateCharacter() {
         "combatente",
         "especialista",
         "ocultista",
+        "none"
     ]
 
     const trails = [
@@ -87,7 +88,7 @@ export default function CreateCharacter() {
     ]
 
     const ranks = [
-        "Nenhum",
+        "none",
         "recruta",
         "operador",
         "agente_especial",
