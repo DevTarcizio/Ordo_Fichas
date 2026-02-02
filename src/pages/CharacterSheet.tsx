@@ -99,7 +99,7 @@ export default function CharacterSheet() {
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
-                <div className="max-w-5xl mx-auto flex flex-col gap-6">
+                <div className="max-w-7xl mx-auto flex flex-col gap-6">
 
                     {/* Header */}
                     <div className="flex justify-between items-center">
@@ -114,7 +114,7 @@ export default function CharacterSheet() {
                          </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
 
                         {/* Card informações */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4">
