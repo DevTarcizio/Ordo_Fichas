@@ -174,7 +174,7 @@ export default function Dashboard() {
                         logout()
                         navigate("/login")
                     }}
-                    className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-700 transition"
+                    className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-700 transition font-text"
                 >
                     Sair
                 </button>

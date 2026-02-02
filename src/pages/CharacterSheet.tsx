@@ -10,6 +10,7 @@ interface Character {
     id: number
     name: string
     age: number
+    avatar: string
     origin: string
     character_class: string
     rank: string
@@ -31,9 +32,6 @@ interface Character {
     atrib_strength: number
 }
 
-
-
-
 export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
@@ -47,8 +45,6 @@ export default function CharacterSheet() {
                 const response = await api.get(`/characters/${id}`, {
                     headers: { Authorization: `Bearer ${token}`}
                 })
-
-                console.log(response.data)
 
                 const formattedCharacters = {
                     ...response.data,
@@ -96,6 +92,8 @@ export default function CharacterSheet() {
         )
     }
 
+    const avatarSrc = `/avatars/${character.avatar}/${character.avatar}.png`
+
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
@@ -108,7 +106,7 @@ export default function CharacterSheet() {
                          </h1>
                          <button
                             onClick={() => navigate("/dashboard/")}
-                            className="px-4 py-2 bg-zinc-600 rounded hover:bg-zinc-700"
+                            className="px-4 py-2 bg-zinc-600 rounded hover:bg-zinc-700 font-text"
                          >  
                             Voltar
                          </button>
@@ -137,10 +135,14 @@ export default function CharacterSheet() {
 
                         {/* Aba Principal */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">     
-                            
-                            <h2 className="text-blue-400 font-smalltitle">
+                            <h1 className="text-blue-400 font-smalltitle text-2xl">
                                 Status
-                            </h2>
+                            </h1>
+
+                            <div className="flex justify-center">
+                                <img src={avatarSrc} alt={character.name} className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"/>
+                            </div>
+
                             <div className="flex flex-col gap-3">
                            
                                 <StatusBar 

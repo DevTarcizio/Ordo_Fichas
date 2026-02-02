@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react"
 import { jwtDecode } from "jwt-decode"
 import { api } from "../services/api"
-import { useParams } from "react-router-dom"
 
 type User = {
     email: string

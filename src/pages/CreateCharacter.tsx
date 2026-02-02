@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
+import AvatarModal from "../components/AvatarModal"
 import atributos_img from "../assets/atributos.png"
 
 function formatEnum(value: string): string {
@@ -15,7 +16,7 @@ function formatEnum(value: string): string {
 export default function CreateCharacter() {
     const navigate = useNavigate()
     const token = localStorage.getItem("token")
-    
+    const [avatarModalOpen, setAvatarModalOpen] = useState(false)
     
     const origins = [
         "academico",
@@ -97,6 +98,7 @@ export default function CreateCharacter() {
     const [form, setForm] = useState({
         name: "",
         age: "",
+        avatar: "",
 
         nex_total: "",
         nex_class: "",
@@ -227,6 +229,16 @@ export default function CreateCharacter() {
                                         />
 
                                     </div>
+
+                                    <div className="flex-1 min-w-25">
+                                        <button
+                                            type="button"
+                                            onClick={() => setAvatarModalOpen(true)}
+                                            className="px-4 py-2 bg-zinc-700 rounded hover:bg-zinc-600 font-text"
+                                        >
+                                            {form.avatar ? `Avatar: ${form.avatar}`: "Selecionar Avatar"}
+                                        </button>
+                                    </div>  
                                 </div>
 
                                 {/* Segunda Linha */}
@@ -455,14 +467,14 @@ export default function CreateCharacter() {
                             <button
                                 type="button"
                                 onClick={() => navigate("/dashboard/")}
-                                className="px-6 py-3 bg-zinc-600 rounded hover:bg-zinc-700"
+                                className="px-6 py-3 bg-zinc-600 rounded hover:bg-zinc-700 font-text"
                             >
                                 Cancelar
                             </button>
 
                             <button
                                 type="submit"
-                                className="px-6 py-3 bg-blue-600 rounded hover:bg-blue-700"
+                                className="px-6 py-3 bg-blue-600 rounded hover:bg-blue-700 font-text"
                             >
                                 Criar Personagem
                             </button>
@@ -470,6 +482,18 @@ export default function CreateCharacter() {
                     </div>
                 </form>
             </div>
+
+            <AvatarModal
+                isOpen={avatarModalOpen}
+                onClose={() => setAvatarModalOpen(false)}
+                onSelect={(avatar) => {
+                    setForm(prev => ({
+                        ...prev,
+                        avatar
+                    }))
+                }}
+            />
+
         </MainLayout>
         
     )
