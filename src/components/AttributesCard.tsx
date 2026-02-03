@@ -27,6 +27,7 @@ type Props =
     | {
         mode: "edit"
         values: AttributeValues
+        avatarMarkSrc?: string
         inputNames: AttributeInputNames
         onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void
         className?: string
@@ -63,7 +64,7 @@ export default function AttributesCard(props: Props) {
                     preserveAspectRatio="none"
                 />
 
-                {props.mode === "view" && props.avatarMarkSrc && (
+                {props.avatarMarkSrc && (
                     <image
                         href={props.avatarMarkSrc}
                         x="148"

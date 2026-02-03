@@ -12,6 +12,8 @@ import type { EditForm } from "../components/CharacterEditModal"
 import StatusEditModal from "../components/StatusEditModal"
 import type { StatusEditForm } from "../components/StatusEditModal"
 import AttributesCard from "../components/AttributesCard"
+import AttributesEditModal from "../components/AttributesEditModal"
+import type { AttributesEditForm } from "../components/AttributesEditModal"
 
 type StatusField = "healthy_points" | "sanity_points" | "effort_points" | "investigation_points"
 
@@ -96,8 +98,11 @@ export default function CharacterSheet() {
     const [editForm, setEditForm] = useState<EditForm | null>(null)
     const [isStatusEditOpen, setIsStatusEditOpen] = useState(false)
     const [statusForm, setStatusForm] = useState<StatusEditForm | null>(null)
+    const [isAttributesEditOpen, setIsAttributesEditOpen] = useState(false)
+    const [attributesForm, setAttributesForm] = useState<AttributesEditForm | null>(null)
     const [isSaving, setIsSaving] = useState(false)
     const [isSavingStatus, setIsSavingStatus] = useState(false)
+    const [isSavingAttributes, setIsSavingAttributes] = useState(false)
     const token = localStorage.getItem("token")
 
     useEffect(() => {
@@ -196,10 +201,34 @@ export default function CharacterSheet() {
         setIsStatusEditOpen(true)
     }
 
+    const openAttributesEditModal = () => {
+        if (!character) return
+
+        setAttributesForm({
+            atrib_agility: String(character.atrib_agility),
+            atrib_intellect: String(character.atrib_intellect),
+            atrib_vitallity: String(character.atrib_vitallity),
+            atrib_presence: String(character.atrib_presence),
+            atrib_strength: String(character.atrib_strength)
+        })
+        setIsAttributesEditOpen(true)
+    }
+
     const handleStatusEditChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target
 
         setStatusForm(prev => {
+            if (!prev) return prev
+            return { ...prev, [name]: value }
+        })
+    }
+
+    const handleAttributesEditChange = (
+        e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    ) => {
+        const { name, value } = e.target
+
+        setAttributesForm(prev => {
             if (!prev) return prev
             return { ...prev, [name]: value }
         })
@@ -258,6 +287,57 @@ export default function CharacterSheet() {
             alert("Erro ao atualizar status")
         } finally {
             setIsSavingStatus(false)
+        }
+    }
+
+    const handleAttributesEditSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+
+        if (!character || !attributesForm) return
+
+        setIsSavingAttributes(true)
+
+        const payload = {
+            atrib_agility: toNumber(attributesForm.atrib_agility, character.atrib_agility),
+            atrib_intellect: toNumber(attributesForm.atrib_intellect, character.atrib_intellect),
+            atrib_vitallity: toNumber(attributesForm.atrib_vitallity, character.atrib_vitallity),
+            atrib_presence: toNumber(attributesForm.atrib_presence, character.atrib_presence),
+            atrib_strength: toNumber(attributesForm.atrib_strength, character.atrib_strength)
+        }
+
+        try {
+            const response = await api.patch(
+                `/characters/${character.id}/`,
+                payload,
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+
+            const updatedCharacter = response.data && Object.keys(response.data).length > 0
+                ? response.data
+                : payload
+
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updatedCharacter,
+                    origin: formatEnum(updatedCharacter.origin ?? prev.origin),
+                    character_class: formatEnum(updatedCharacter.character_class ?? prev.character_class),
+                    subclass: formatEnum(updatedCharacter.subclass ?? prev.subclass),
+                    trail: formatEnum(updatedCharacter.trail ?? prev.trail),
+                    rank: formatEnum(updatedCharacter.rank ?? prev.rank)
+                }
+                return merged
+            })
+
+            setIsAttributesEditOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao atualizar atributos")
+        } finally {
+            setIsSavingAttributes(false)
         }
     }
 
@@ -472,7 +552,16 @@ export default function CharacterSheet() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {/* Card Atributos */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4 min-h-110">
-                            <h1 className="text-blue-400 font-smalltitle text-2xl">Atributos</h1>
+                            <div className="flex items-center justify-between">
+                                <h1 className="text-blue-400 font-smalltitle text-2xl">Atributos</h1>
+                                <button
+                                    onClick={openAttributesEditModal}
+                                    className="px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded flex items-center gap-2 font-text"
+                                    title="Editar atributos"
+                                >
+                                    <Pencil size={18} />
+                                </button>
+                            </div>
                             <div className="w-full flex justify-center">
                                 <AttributesCard
                                     mode="view"
@@ -515,6 +604,16 @@ export default function CharacterSheet() {
                 onClose={() => setIsStatusEditOpen(false)}
                 onChange={handleStatusEditChange}
                 onSubmit={handleStatusEditSubmit}
+            />
+
+            <AttributesEditModal
+                isOpen={isAttributesEditOpen}
+                form={attributesForm}
+                isSaving={isSavingAttributes}
+                avatarMarkSrc={`/avatars/${character.avatar}/mark.png`}
+                onClose={() => setIsAttributesEditOpen(false)}
+                onChange={handleAttributesEditChange}
+                onSubmit={handleAttributesEditSubmit}
             />
         </MainLayout>
     )
