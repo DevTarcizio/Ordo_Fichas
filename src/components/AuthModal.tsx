@@ -1,8 +1,9 @@
-import { X } from "lucide-react"
+﻿import { X } from "lucide-react"
 import { useState } from "react"
 import { login, register } from "../services/api"
-import { useAuth } from "../contexts/AuthContext"
+import { useAuth } from "../contexts/useAuth"
 import { useNavigate } from "react-router-dom"
+import type { AxiosError } from "axios"
 
 type Props = {
     isOpen: boolean
@@ -10,9 +11,11 @@ type Props = {
     mode: "login" | "register"
 }
 
-export default function AuthModal({ isOpen, onClose, mode}:Props) {
-    if (!isOpen) return null
+type ErrorPayload = {
+    detail?: string
+}
 
+export default function AuthModal({ isOpen, onClose, mode }: Props) {
     const isLogin = mode === "login"
 
     // Estados dos inputs
@@ -26,7 +29,9 @@ export default function AuthModal({ isOpen, onClose, mode}:Props) {
 
     const { login: loginContext } = useAuth()
     const navigate = useNavigate()
-    
+
+    if (!isOpen) return null
+
     async function handleSubmit() {
         try {
             setLoading(true)
@@ -48,15 +53,16 @@ export default function AuthModal({ isOpen, onClose, mode}:Props) {
             loginContext(data.access_token)
             onClose()
             navigate("/dashboard")
-        } catch (err: any) {
-            setError(err.response?.data?.detail || err.message)
+        } catch (err: unknown) {
+            const axiosError = err as AxiosError<ErrorPayload>
+            setError(axiosError.response?.data?.detail || axiosError.message)
         } finally {
             setLoading(false)
         }
     }
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-
             {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-black/70 backdrop-blur-sm"
@@ -65,7 +71,6 @@ export default function AuthModal({ isOpen, onClose, mode}:Props) {
 
             {/* Modal */}
             <div className="relative z-10 w-full max-w-md bg-zinc-900 p-8 rounded-2xl shadow-xl text-white">
-
                 {/* Botão de Fechar */}
                 <button
                     onClick={onClose}
@@ -81,7 +86,6 @@ export default function AuthModal({ isOpen, onClose, mode}:Props) {
                 {error && (
                     <p className="text-red-500 text-center mb-2">{error}</p>
                 )}
-
 
                 <form className="flex flex-col gap-4">
                     {!isLogin && (
@@ -148,7 +152,7 @@ export default function AuthModal({ isOpen, onClose, mode}:Props) {
                         </div>
                     )}
 
-                    <button 
+                    <button
                         type="button"
                         onClick={handleSubmit}
                         disabled={loading}

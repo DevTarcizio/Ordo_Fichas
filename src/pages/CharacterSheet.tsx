@@ -1,68 +1,105 @@
-import { useEffect, useState } from "react"
+﻿import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Heart, Brain, Zap, MessageCircleQuestionMark, Pencil } from "lucide-react"
-import formatEnum from "../utils"
+import { Brain, Heart, MessageCircleQuestionMark, Zap } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import { formatEnum } from "../utils"
+import type { CharacterDetails } from "../types/character"
 
-export interface Character {
-    id: number
-    name: string
-    nationality: string
-    age: number
-    avatar: string
-    origin: string
-    character_class: string
-    rank: string
-    subclass: string
-    trail: string
-    nex_total: number
-    nex_class: number
-    nex_subclass: number
-    healthy_points: number
-    healthy_max: number
-    sanity_points: number
-    sanity_max: number
-    effort_points: number
-    effort_max: number
-    investigation_points: number
-    investigation_max: number
-    atrib_agility: number
-    atrib_intellect: number
-    atrib_vitallity: number
-    atrib_presence: number
-    atrib_strength: number
-    displacement: number
-    PE_per_round: number
+type StatusField = "healthy_points" | "sanity_points" | "effort_points" | "investigation_points"
+
+type StatusMaxField = "healthy_max" | "sanity_max" | "effort_max" | "investigation_max"
+
+type StatusConfig = {
+    label: string
+    icon: LucideIcon
+    field: StatusField
+    maxField: StatusMaxField
+    gradient: string
+}
+
+const statusConfigs: StatusConfig[] = [
+    {
+        label: "VIDA",
+        icon: Heart,
+        field: "healthy_points",
+        maxField: "healthy_max",
+        gradient: "bg-gradient-to-r from-red-700 to-red-500"
+    },
+    {
+        label: "SANIDADE",
+        icon: Brain,
+        field: "sanity_points",
+        maxField: "sanity_max",
+        gradient: "bg-gradient-to-r from-blue-700 to-blue-500"
+    },
+    {
+        label: "ESFORÇO",
+        icon: Zap,
+        field: "effort_points",
+        maxField: "effort_max",
+        gradient: "bg-gradient-to-r from-yellow-700 to-yellow-500"
+    },
+    {
+        label: "INVESTIGAÇÃO",
+        icon: MessageCircleQuestionMark,
+        field: "investigation_points",
+        maxField: "investigation_max",
+        gradient: "bg-gradient-to-r from-green-700 to-green-500"
+    }
+]
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value))
+}
+
+function getAvatarSrc(character: CharacterDetails) {
+    const lifePercent = character.healthy_points / character.healthy_max
+    const sanityPercent = character.sanity_points / character.sanity_max
+
+    if (lifePercent <= 0.0 && sanityPercent <= 0.0) {
+        return `/avatars/${character.avatar}/${character.avatar}_dying_and_madness.png`
+    }
+
+    if (sanityPercent <= 0.0) {
+        return `/avatars/${character.avatar}/${character.avatar}_madness.png`
+    }
+
+    if (lifePercent <= 0.0) {
+        return `/avatars/${character.avatar}/${character.avatar}_dying.png`
+    }
+
+    if (lifePercent <= 0.5) {
+        return `/avatars/${character.avatar}/${character.avatar}_hurt.png`
+    }
+
+    return `/avatars/${character.avatar}/${character.avatar}.png`
 }
 
 export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
-    const [character, setCharacter] = useState<Character | null>(null)
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-    const [editableFields, setEditableFields] = useState<Character | null>(null)
-    const [currentFields, setCurrentFields] = useState<(keyof Character)[]>([])
+    const [character, setCharacter] = useState<CharacterDetails | null>(null)
     const token = localStorage.getItem("token")
-
 
     useEffect(() => {
         const fetchCharacter = async () => {
             try {
                 const response = await api.get(`/characters/${id}`, {
-                    headers: { Authorization: `Bearer ${token}`}
+                    headers: { Authorization: `Bearer ${token}` }
                 })
 
-                const formattedCharacters = {
+                const formattedCharacter = {
                     ...response.data,
                     origin: formatEnum(response.data.origin),
                     character_class: formatEnum(response.data.character_class),
                     rank: formatEnum(response.data.rank),
                     subclass: formatEnum(response.data.subclass),
-                    trail: formatEnum(response.data.trail),
+                    trail: formatEnum(response.data.trail)
                 }
-                setCharacter(formattedCharacters)
+                setCharacter(formattedCharacter)
             } catch (err) {
                 console.error(err)
                 alert("Erro ao buscar personagem")
@@ -72,10 +109,7 @@ export default function CharacterSheet() {
         fetchCharacter()
     }, [id, token])
 
-    async function updateStatus(
-        field: "healthy_points" | "sanity_points" | "effort_points" | "investigation_points",
-        newValue: number
-    ) {
+    async function updateStatus(field: StatusField, newValue: number) {
         try {
             await api.patch(
                 `/characters/${character!.id}`,
@@ -90,6 +124,21 @@ export default function CharacterSheet() {
         }
     }
 
+    const handleStatusChange = (field: StatusField, maxField: StatusMaxField, delta: number) => {
+        setCharacter(prev => {
+            if (!prev) return prev
+
+            const newValue = clamp(prev[field] + delta, 0, prev[maxField])
+
+            updateStatus(field, newValue)
+
+            return {
+                ...prev,
+                [field]: newValue
+            }
+        })
+    }
+
     if (!character) {
         return (
             <MainLayout>
@@ -100,75 +149,24 @@ export default function CharacterSheet() {
         )
     }
 
-    const getAvatarSrc = () => {
-        if (!character) return ""
-
-        const lifePercent = character.healthy_points / character.healthy_max
-        const sanityPercent = character.sanity_points / character.sanity_max
-
-        if (lifePercent <= 0.0 && sanityPercent <= 0.0) {
-            return `/avatars/${character.avatar}/${character.avatar}_dying_and_madness.png`
-        }
-        
-        if (sanityPercent <= 0.0) {
-            return `/avatars/${character.avatar}/${character.avatar}_madness.png`
-        }
-
-        if (lifePercent <= 0.0) {
-            return `/avatars/${character.avatar}/${character.avatar}_dying.png`
-        }
-
-        if (lifePercent <= 0.5 ) {
-            return `/avatars/${character.avatar}/${character.avatar}_hurt.png`
-        }
-
-        return `/avatars/${character.avatar}/${character.avatar}.png`
-    }
-
-    const handleUpdate = (updatedData: Partial<Character>) => {
-
-        setCharacter(prev => {
-            if (!prev) return prev;
-
-            const formattedData = { 
-                ...updatedData,
-                origin: updatedData.origin ? formatEnum(updatedData.origin) : prev.origin,
-                character_class: updatedData.character_class ? formatEnum(updatedData.character_class) : prev.character_class,
-                rank: updatedData.rank ? formatEnum(updatedData.rank) : prev.rank,
-                subclass: updatedData.subclass ? formatEnum(updatedData.subclass) : prev.subclass,
-                trail: updatedData.trail ? formatEnum(updatedData.trail) : prev.trail,
-            }
-
-            return { ...prev, ...formattedData }
-        })
-    }
-
-    const openEditModal = (fields: (keyof Character)[]) => {
-        setEditableFields(character)
-        setCurrentFields(fields)
-        setIsEditModalOpen(true)
-    }
-
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
                 <div className="max-w-7xl mx-auto flex flex-col gap-6">
-
                     {/* Header */}
                     <div className="flex justify-between items-center">
-                         <h1 className="text-3xl font-bigtitle text-blue-500">
+                        <h1 className="text-3xl font-bigtitle text-blue-500">
                             {character.name}
-                         </h1>
-                         <button
+                        </h1>
+                        <button
                             onClick={() => navigate("/dashboard/")}
                             className="px-4 py-2 bg-zinc-600 rounded hover:bg-zinc-700 font-text"
-                         >  
+                        >
                             Voltar
-                         </button>
+                        </button>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-
                         {/* Card informações */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md">
                             <div className="flex justify-between items-center">
@@ -178,7 +176,6 @@ export default function CharacterSheet() {
                             </div>
 
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
                                     <span className="text-zinc-300 font-text">Idade</span>
                                     <span className="text-white font-text text-lg">{character.age}</span>
@@ -198,7 +195,7 @@ export default function CharacterSheet() {
                                     <span className="text-zinc-300 font-text">Classe</span>
                                     <span className="text-white font-text text-lg">{character.character_class}</span>
                                 </div>
-                                
+
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
                                     <span className="text-zinc-300 font-text">Subclasse</span>
                                     <span className="text-white font-text text-lg">{character.subclass}</span>
@@ -226,7 +223,6 @@ export default function CharacterSheet() {
 
                                 {/* Bloco NEX */}
                                 <div className="bg-zinc-900/70 p-6 rounded-lg flex flex-col gap-4 col-span-2 md:col-span-3 shadow-inner border border-zinc-700">
-                                    
                                     {/* Total */}
                                     <div className="flex justify-center items-center text-white text-2xl font-text mb-2">
                                         <span className="text-zinc-300">Nex Total:</span>
@@ -248,128 +244,38 @@ export default function CharacterSheet() {
                             </div>
                         </div>
 
-
                         {/* Aba Principal */}
-                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">     
-                            <h1 className="text-blue-400 font-smalltitle text-2xl">
-                                Status
-                            </h1>
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">
+                            <h1 className="text-blue-400 font-smalltitle text-2xl">Status</h1>
 
                             <div className="flex justify-center">
-                                <img src={getAvatarSrc()} alt={character.name} className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"/>
+                                <img
+                                    src={getAvatarSrc(character)}
+                                    alt={character.name}
+                                    className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"
+                                />
                             </div>
 
                             <div className="flex flex-col gap-3">
-                           
-                                <StatusBar 
-                                    label="VIDA"
-                                    icon={Heart}
-                                    current={character.healthy_points}
-                                    max={character.healthy_max}
-                                    gradient="bg-gradient-to-r from-red-700 to-red-500"
-                                    onChange={(delta) => {
-                                        setCharacter(prev => {
-                                            if (!prev) return prev
-
-                                            const newValue = Math.min(
-                                                prev.healthy_max,
-                                                Math.max(0, prev.healthy_points + delta)
-                                            )
-
-                                            updateStatus("healthy_points", newValue)
-
-                                            return {
-                                                ...prev,
-                                                healthy_points: newValue
-                                            }
-                                        })
-                                    }}
-                                /> 
-
-                                <StatusBar 
-                                    label="SANIDADE"
-                                    icon={Brain}
-                                    current={character.sanity_points}
-                                    max={character.sanity_max}
-                                    gradient="bg-gradient-to-r from-blue-700 to-blue-500"
-                                    onChange={(delta) => {
-                                        setCharacter(prev => {
-                                            if (!prev) return prev
-
-                                            const newValue = Math.min(
-                                                prev.sanity_max,
-                                                Math.max(0, prev.sanity_points + delta)
-                                            )
-
-                                            updateStatus("sanity_points", newValue)
-
-                                            return {
-                                                ...prev,
-                                                sanity_points: newValue
-                                            }
-                                        })
-                                    }}
-                                /> 
-
-                                <StatusBar 
-                                    label="ESFORÇO"
-                                    icon={Zap}
-                                    current={character.effort_points}
-                                    max={character.effort_max}
-                                    gradient="bg-gradient-to-r from-yellow-700 to-yellow-500"
-                                    onChange={(delta) => {
-                                        setCharacter(prev => {
-                                            if (!prev) return prev
-
-                                            const newValue = Math.min(
-                                                prev.effort_max,
-                                                Math.max(0, prev.effort_points + delta)
-                                            )
-
-                                            updateStatus("effort_points", newValue)
-
-                                            return {
-                                                ...prev,
-                                                effort_points: newValue
-                                            }
-                                        })
-                                    }}
-                                />  
-
-                                <StatusBar 
-                                    label="INVESTIGAÇÃO"
-                                    icon={MessageCircleQuestionMark}
-                                    current={character.investigation_points}
-                                    max={character.investigation_max}
-                                    gradient="bg-gradient-to-r from-green-700 to-green-500"
-                                    onChange={(delta) => {
-                                        setCharacter(prev => {
-                                            if (!prev) return prev
-
-                                            const newValue = Math.min(
-                                                prev.investigation_max,
-                                                Math.max(0, prev.investigation_points + delta)
-                                            )
-
-                                            updateStatus("investigation_points", newValue)
-
-                                            return {
-                                                ...prev,
-                                                investigation_points: newValue
-                                            }
-                                        })
-                                    }}
-                                />     
-                            
+                                {statusConfigs.map((config) => (
+                                    <StatusBar
+                                        key={config.field}
+                                        label={config.label}
+                                        icon={config.icon}
+                                        current={character[config.field]}
+                                        max={character[config.maxField]}
+                                        gradient={config.gradient}
+                                        onChange={(delta) => {
+                                            handleStatusChange(config.field, config.maxField, delta)
+                                        }}
+                                    />
+                                ))}
                             </div>
                         </div>
-
                     </div>
 
                     {/* Principal */}
-                    <div className="bg-zinc-900 p-4 rounded grid grid-cols-2 gap-4">
-                        
-                    </div>
+                    <div className="bg-zinc-900 p-4 rounded grid grid-cols-2 gap-4"></div>
 
                     {/* Status */}
                     <div className="bg-zinc-900 p-4 rounded grid grid-cols-3 gap-4">
@@ -387,7 +293,6 @@ export default function CharacterSheet() {
                         <div><strong>Força:</strong> {character.atrib_strength}</div>
                     </div>
                 </div>
-
             </div>
         </MainLayout>
     )

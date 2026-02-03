@@ -1,39 +1,33 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react"
+﻿import { useCallback, useEffect, useRef, useState } from "react"
 import { jwtDecode } from "jwt-decode"
+import type { JwtPayload } from "jwt-decode"
 import { api } from "../services/api"
+import { AuthContext } from "./authContext"
+import type { User } from "./authContext"
 
-type User = {
-    email: string
+type AuthTokenPayload = JwtPayload & {
+    sub: string
     role: "master" | "player"
+    exp: number
 }
-
-type AuthContextType = {
-    user: User | null
-    token: string | null
-    isAuthenticated: boolean
-    login: (token: string) => void
-    logout: () => void
-}
-
-const AuthContext = createContext<AuthContextType>({} as AuthContextType)
 
 function decodeToken(token: string): User | null {
-        try {
-            const decoded: any = jwtDecode(token)
-            if (decoded.sub && decoded.role) {
-                return {email: decoded.sub, role: decoded.role}
-            } else {
-                throw new Error("token inválido: falta sub ou role")
-            }
-        } catch (err) {
-            console.error("token inválido no useEffect", err)
-            localStorage.removeItem("token")
-            return null
+    try {
+        const decoded = jwtDecode<AuthTokenPayload>(token)
+        if (decoded.sub && decoded.role) {
+            return { email: decoded.sub, role: decoded.role }
         }
+        throw new Error("token inválido: falta sub ou role")
+    } catch (err) {
+        console.error("token inválido no useEffect", err)
+        localStorage.removeItem("token")
+        return null
     }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshTimeout = useRef<number | null>(null)
+    const refreshLoginRef = useRef<(oldToken: string) => Promise<void>>()
     const storedToken = localStorage.getItem("token")
     const [token, setToken] = useState<string | null>(storedToken)
     const [user, setUser] = useState<User | null>(() => {
@@ -41,58 +35,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return null
     })
 
-    function clearRefreshTimer() {
+    const clearRefreshTimer = useCallback(() => {
         if (refreshTimeout.current) {
             clearTimeout(refreshTimeout.current)
         }
-    }
+    }, [])
 
-    function scheduleRefresh(token: string) {
+    const scheduleRefresh = useCallback((tokenValue: string) => {
         clearRefreshTimer()
 
-        const decoded: any = jwtDecode(token)
+        const decoded = jwtDecode<AuthTokenPayload>(tokenValue)
         const exp = decoded.exp * 1000
         const now = Date.now()
         const timeUntilRefresh = exp - now - 60_000
 
         if (timeUntilRefresh <= 0) {
-            refresh_login(token)
+            void refreshLoginRef.current?.(tokenValue)
             return
         }
 
         refreshTimeout.current = window.setTimeout(() => {
-            refresh_login(token)
+            void refreshLoginRef.current?.(tokenValue)
         }, timeUntilRefresh)
-    }
+    }, [clearRefreshTimer])
 
-    async function refresh_login(oldToken: string) {        
+    const applySession = useCallback((newToken: string) => {
+        localStorage.setItem("token", newToken)
+        setToken(newToken)
+        setUser(decodeToken(newToken))
+        scheduleRefresh(newToken)
+    }, [scheduleRefresh])
+
+    const logout = useCallback(() => {
+        clearRefreshTimer()
+        localStorage.removeItem("token")
+        setToken(null)
+        setUser(null)
+    }, [clearRefreshTimer])
+
+    const refreshLogin = useCallback(async (oldToken: string) => {
         try {
             const response = await api.post(
-                "/auth/refresh_token", {
+                "/auth/refresh_token",
+                {},
+                {
                     headers: {
                         Authorization: `Bearer ${oldToken}`
-                    }   
+                    }
                 }
             )
 
             const newToken = response.data.access_token
-            login(newToken)
+            applySession(newToken)
         } catch (err) {
             console.log(err)
             alert("Erro ao refrescar o token")
             logout()
         }
-    }
-    
+    }, [applySession, logout])
+
+    refreshLoginRef.current = refreshLogin
+
     useEffect(() => {
-        const storedToken = localStorage.getItem("token")
-        if (storedToken) {
+        const stored = localStorage.getItem("token")
+        if (stored) {
             try {
-                const decoded: any = jwtDecode(storedToken)
+                const decoded = jwtDecode<AuthTokenPayload>(stored)
                 if (decoded.sub && decoded.role && decoded.exp) {
                     setUser({ email: decoded.sub, role: decoded.role })
-                    setToken(storedToken)
-                    scheduleRefresh(storedToken)
+                    setToken(stored)
+                    scheduleRefresh(stored)
                 } else {
                     throw new Error("Token inválido")
                 }
@@ -101,32 +113,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setUser(null)
                 setToken(null)
             }
-        } 
+        }
 
         return () => {
             clearRefreshTimer()
         }
-    }, [])
+    }, [clearRefreshTimer, scheduleRefresh])
 
-    
-        
-
-    function login(newToken: string) {
-        localStorage.setItem("token", newToken)
-        setToken(newToken)
-
-        const decodedUser = decodeToken(newToken)
-        setUser(decodedUser)
-
-        scheduleRefresh(newToken)
-    }
-
-    function logout() {
-        clearRefreshTimer()
-        localStorage.removeItem("token")
-        setToken(null)
-        setUser(null)
-    }
+    const login = useCallback((newToken: string) => {
+        applySession(newToken)
+    }, [applySession])
 
     return (
         <AuthContext.Provider
@@ -142,5 +138,3 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         </AuthContext.Provider>
     )
 }
-
-export const useAuth = () => useContext(AuthContext)

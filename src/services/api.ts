@@ -1,15 +1,16 @@
-import axios from "axios";
+﻿import axios from "axios"
 
 export const api = axios.create({
     baseURL: "https://ordopraesdium-api.onrender.com/",
-    withCredentials: true  
+    withCredentials: true
 })
 
 // Interceptor: injeta token automaticamente
-api.interceptors.request.use(config => {
+api.interceptors.request.use((config) => {
     const token = localStorage.getItem("token")
 
     if (token) {
+        config.headers = config.headers ?? {}
         config.headers.Authorization = `Bearer ${token}`
     }
 
@@ -21,16 +22,16 @@ export async function login(email: string, password: string) {
     const form = new URLSearchParams()
     form.append("username", email)
     form.append("password", password)
-    
+
     const res = await api.post("/auth/token", form)
 
     return res.data
 }
 
-// RESPONSE → tenta refresh automático
+// Response: tenta refresh automático
 api.interceptors.response.use(
-    response => response,
-    async error => {
+    (response) => response,
+    async (error) => {
         if (error.response?.status === 401) {
             try {
                 const res = await api.post("/auth/refresh_token")
@@ -38,6 +39,7 @@ api.interceptors.response.use(
 
                 localStorage.setItem("token", newToken)
 
+                error.config.headers = error.config.headers ?? {}
                 error.config.headers.Authorization = `Bearer ${newToken}`
                 return api(error.config)
             } catch {
@@ -52,8 +54,8 @@ api.interceptors.response.use(
 
 export async function register(username: string, email: string, password: string, role: string) {
     const res = await api.post("/users/register", {
-        username, 
-        email, 
+        username,
+        email,
         password,
         role
     })

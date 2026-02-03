@@ -1,4 +1,4 @@
-export default function formatEnum(value: string): string {
+﻿export function formatEnum(value: string): string {
     if (!value) return ""
     return value
         .split("_")

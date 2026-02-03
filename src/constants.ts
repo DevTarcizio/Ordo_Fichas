@@ -1,5 +1,3 @@
-import type { Character } from "./pages/CharacterSheet"
-
 export const origins = [
     "academico",
     "agente_de_saude",

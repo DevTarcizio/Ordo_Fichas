@@ -1,4 +1,4 @@
-import { useState } from "react"
+﻿import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
@@ -6,7 +6,7 @@ import AvatarModal from "../components/AvatarModal"
 import FloatingInput from "../components/FloatingInput"
 import FloatingSelect from "../components/FloatingSelect"
 import atributos_img from "../assets/atributos.png"
-import formatEnum from "../utils"
+import { formatEnum } from "../utils"
 import { origins, classes, ranks, trails, subclasses } from "../constants"
 
 export default function CreateCharacter() {
@@ -461,3 +461,4 @@ export default function CreateCharacter() {
         
     )
 }
+
