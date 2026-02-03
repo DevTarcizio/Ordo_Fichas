@@ -1,16 +1,12 @@
 ﻿import FloatingInput from "./FloatingInput"
 import FloatingSelect from "./FloatingSelect"
-import { classes, origins, ranks, subclasses, trails } from "../constants"
+import { ranks } from "../constants"
 import { formatEnum } from "../utils"
 
 type EditForm = {
     name: string
     age: string
     nationality: string
-    origin: string
-    character_class: string
-    subclass: string
-    trail: string
     rank: string
     nex_total: string
     nex_class: string
@@ -38,6 +34,7 @@ export default function CharacterEditModal({
 }: Props) {
     if (!isOpen || !editForm) return null
 
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div
@@ -47,13 +44,13 @@ export default function CharacterEditModal({
 
             <form
                 onSubmit={onSubmit}
-                className="relative z-10 w-full max-w-3xl bg-zinc-900 p-6 rounded-2xl shadow-xl text-white"
+                className="relative z-10 w-[min(100%-1.5rem,72rem)] max-h-[85vh] overflow-y-auto bg-zinc-900 p-4 md:p-6 rounded-2xl shadow-xl text-white"
             >
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="font-bigtitle text-2xl text-blue-400">Editar Informações</h2>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <FloatingInput
                         label="Nome"
                         name="name"
@@ -74,50 +71,6 @@ export default function CharacterEditModal({
                         type="number"
                         value={editForm.age}
                         onChange={onChange}
-                    />
-
-                    <FloatingSelect
-                        label="Origem"
-                        name="origin"
-                        value={editForm.origin}
-                        onChange={onChange}
-                        options={origins.map((origin) => ({
-                            value: origin,
-                            label: formatEnum(origin)
-                        }))}
-                    />
-
-                    <FloatingSelect
-                        label="Classe"
-                        name="character_class"
-                        value={editForm.character_class}
-                        onChange={onChange}
-                        options={classes.map((characterClass) => ({
-                            value: characterClass,
-                            label: formatEnum(characterClass)
-                        }))}
-                    />
-
-                    <FloatingSelect
-                        label="Subclasse"
-                        name="subclass"
-                        value={editForm.subclass}
-                        onChange={onChange}
-                        options={subclasses.map((subclass) => ({
-                            value: subclass,
-                            label: formatEnum(subclass)
-                        }))}
-                    />
-
-                    <FloatingSelect
-                        label="Trilha"
-                        name="trail"
-                        value={editForm.trail}
-                        onChange={onChange}
-                        options={trails.map((trail) => ({
-                            value: trail,
-                            label: formatEnum(trail)
-                        }))}
                     />
 
                     <FloatingSelect

@@ -75,3 +75,29 @@ export const ranks = [
     "oficial_de_operacoes",
     "agente_de_elite"
 ]
+
+export const classTrailMap: Record<string, string[]> = {
+    mundano: ["none"],
+    transformado: ["none"],
+    combatente: [
+        "aniquilador",
+        "comandante_de_campo",
+        "guerreiro",
+        "operacoes_especiais",
+        "tropa_de_choque"
+    ],
+    especialista: [
+        "atirador_de_elite",
+        "infiltrador",
+        "medico_de_campo",
+        "negociador",
+        "tecnico"
+    ],
+    ocultista: [
+        "conduite",
+        "flagelador",
+        "graduado",
+        "intuitivo",
+        "lamina_paranormal"
+    ]
+}

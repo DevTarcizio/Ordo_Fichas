@@ -54,7 +54,7 @@ export default function Dashboard() {
         if (!confirmDelete) return
 
         try {
-            await api.delete(`/characters/${id}`)
+            await api.delete(`/characters/${id}/`)
             setCharacters(prev => prev.filter(char => char.id !== id))
         } catch (err) {
             console.log(err)

@@ -9,6 +9,9 @@ import { formatEnum, reverseFormatEnum } from "../utils"
 import type { CharacterDetails } from "../types/character"
 import CharacterEditModal from "../components/CharacterEditModal"
 import type { EditForm } from "../components/CharacterEditModal"
+import StatusEditModal from "../components/StatusEditModal"
+import type { StatusEditForm } from "../components/StatusEditModal"
+import AttributesCard from "../components/AttributesCard"
 
 type StatusField = "healthy_points" | "sanity_points" | "effort_points" | "investigation_points"
 
@@ -91,13 +94,16 @@ export default function CharacterSheet() {
     const [character, setCharacter] = useState<CharacterDetails | null>(null)
     const [isEditOpen, setIsEditOpen] = useState(false)
     const [editForm, setEditForm] = useState<EditForm | null>(null)
+    const [isStatusEditOpen, setIsStatusEditOpen] = useState(false)
+    const [statusForm, setStatusForm] = useState<StatusEditForm | null>(null)
     const [isSaving, setIsSaving] = useState(false)
+    const [isSavingStatus, setIsSavingStatus] = useState(false)
     const token = localStorage.getItem("token")
 
     useEffect(() => {
         const fetchCharacter = async () => {
             try {
-                const response = await api.get(`/characters/${id}`, {
+                const response = await api.get(`/characters/${id}/`, {
                     headers: { Authorization: `Bearer ${token}` }
                 })
 
@@ -122,7 +128,7 @@ export default function CharacterSheet() {
     async function updateStatus(field: StatusField, newValue: number) {
         try {
             await api.patch(
-                `/characters/${character!.id}`,
+                `/characters/${character!.id}/`,
                 { [field]: newValue },
                 {
                     headers: { Authorization: `Bearer ${token}` }
@@ -152,21 +158,19 @@ export default function CharacterSheet() {
     const openEditModal = () => {
         if (!character) return
 
-        setEditForm({
+        const baseForm = {
             name: character.name,
             age: String(character.age),
             nationality: character.nationality,
-            origin: reverseFormatEnum(character.origin),
-            character_class: reverseFormatEnum(character.character_class),
-            subclass: reverseFormatEnum(character.subclass),
-            trail: reverseFormatEnum(character.trail),
             rank: reverseFormatEnum(character.rank),
             nex_total: String(character.nex_total),
             nex_class: String(character.nex_class),
             nex_subclass: String(character.nex_subclass),
             PE_per_round: String(character.PE_per_round),
             displacement: String(character.displacement)
-        })
+        }
+
+        setEditForm(baseForm)
         setIsEditOpen(true)
     }
 
@@ -175,8 +179,86 @@ export default function CharacterSheet() {
 
         setEditForm(prev => {
             if (!prev) return prev
+
             return { ...prev, [name]: value }
         })
+    }
+
+    const openStatusEditModal = () => {
+        if (!character) return
+
+        setStatusForm({
+            healthy_max: String(character.healthy_max),
+            sanity_max: String(character.sanity_max),
+            effort_max: String(character.effort_max),
+            investigation_max: String(character.investigation_max)
+        })
+        setIsStatusEditOpen(true)
+    }
+
+    const handleStatusEditChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target
+
+        setStatusForm(prev => {
+            if (!prev) return prev
+            return { ...prev, [name]: value }
+        })
+    }
+
+    const handleStatusEditSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+
+        if (!character || !statusForm) return
+
+        setIsSavingStatus(true)
+
+        const payload = {
+            healthy_max: toNumber(statusForm.healthy_max, character.healthy_max),
+            sanity_max: toNumber(statusForm.sanity_max, character.sanity_max),
+            effort_max: toNumber(statusForm.effort_max, character.effort_max),
+            investigation_max: toNumber(statusForm.investigation_max, character.investigation_max)
+        }
+
+        try {
+            const response = await api.patch(
+                `/characters/${character.id}/`,
+                payload,
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+
+            const updatedCharacter = response.data && Object.keys(response.data).length > 0
+                ? response.data
+                : payload
+
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updatedCharacter
+                }
+                return {
+                    ...merged,
+                    origin: formatEnum(merged.origin),
+                    character_class: formatEnum(merged.character_class),
+                    subclass: formatEnum(merged.subclass),
+                    trail: formatEnum(merged.trail),
+                    rank: formatEnum(merged.rank),
+                    healthy_points: clamp(merged.healthy_points, 0, merged.healthy_max),
+                    sanity_points: clamp(merged.sanity_points, 0, merged.sanity_max),
+                    effort_points: clamp(merged.effort_points, 0, merged.effort_max),
+                    investigation_points: clamp(merged.investigation_points, 0, merged.investigation_max)
+                }
+            })
+
+            setIsStatusEditOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao atualizar status")
+        } finally {
+            setIsSavingStatus(false)
+        }
     }
 
     const handleEditSubmit = async (e: React.FormEvent) => {
@@ -190,10 +272,6 @@ export default function CharacterSheet() {
             name: editForm.name.trim(),
             age: toNumber(editForm.age, character.age),
             nationality: editForm.nationality.trim(),
-            origin: editForm.origin,
-            character_class: editForm.character_class,
-            subclass: editForm.subclass,
-            trail: editForm.trail,
             rank: editForm.rank,
             nex_total: toNumber(editForm.nex_total, character.nex_total),
             nex_class: toNumber(editForm.nex_class, character.nex_class),
@@ -203,26 +281,32 @@ export default function CharacterSheet() {
         }
 
         try {
-            await api.patch(
-                `/characters/${character.id}`,
+            const response = await api.patch(
+                `/characters/${character.id}/`,
                 payload,
                 {
                     headers: { Authorization: `Bearer ${token}` }
                 }
             )
 
+            const updatedCharacter = response.data && Object.keys(response.data).length > 0
+                ? response.data
+                : payload
+
             setCharacter(prev => {
                 if (!prev) return prev
 
-                return {
+                const merged = {
                     ...prev,
-                    ...payload,
-                    origin: formatEnum(payload.origin),
-                    character_class: formatEnum(payload.character_class),
-                    subclass: formatEnum(payload.subclass),
-                    trail: formatEnum(payload.trail),
-                    rank: formatEnum(payload.rank)
+                    ...updatedCharacter,
+                    origin: formatEnum(updatedCharacter.origin ?? prev.origin),
+                    character_class: formatEnum(updatedCharacter.character_class ?? prev.character_class),
+                    subclass: formatEnum(updatedCharacter.subclass ?? prev.subclass),
+                    trail: formatEnum(updatedCharacter.trail ?? prev.trail),
+                    rank: formatEnum(updatedCharacter.rank ?? payload.rank)
                 }
+
+                return merged
             })
 
             setIsEditOpen(false)
@@ -247,7 +331,7 @@ export default function CharacterSheet() {
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
-                <div className="max-w-7xl mx-auto flex flex-col gap-6">
+                <div className="max-w-7xl mx-auto flex flex-col gap-2">
                     {/* Header */}
                     <div className="flex justify-between items-center">
                         <h1 className="text-3xl font-bigtitle text-blue-500">
@@ -348,7 +432,16 @@ export default function CharacterSheet() {
 
                         {/* Aba Principal */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">
-                            <h1 className="text-blue-400 font-smalltitle text-2xl">Status</h1>
+                            <div className="flex items-center justify-between">
+                                <h1 className="text-blue-400 font-smalltitle text-2xl">Status</h1>
+                                <button
+                                    onClick={openStatusEditModal}
+                                    className="px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded flex items-center gap-2 font-text"
+                                    title="Editar status"
+                                >
+                                    <Pencil size={18} />
+                                </button>
+                            </div>
 
                             <div className="flex justify-center">
                                 <img
@@ -376,23 +469,32 @@ export default function CharacterSheet() {
                         </div>
                     </div>
 
-                    {/* Principal */}
-                    <div className="bg-zinc-900 p-4 rounded grid grid-cols-2 gap-4"></div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {/* Card Atributos */}
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4 min-h-110">
+                            <h1 className="text-blue-400 font-smalltitle text-2xl">Atributos</h1>
+                            <div className="w-full flex justify-center">
+                                <AttributesCard
+                                    mode="view"
+                                    values={{
+                                        agility: character.atrib_agility,
+                                        intellect: character.atrib_intellect,
+                                        vitallity: character.atrib_vitallity,
+                                        presence: character.atrib_presence,
+                                        strength: character.atrib_strength
+                                    }}
+                                    avatarMarkSrc={`/avatars/${character.avatar}/mark.png`}
+                                />
+                            </div>
+                        </div>
 
-                    {/* Status */}
-                    <div className="bg-zinc-900 p-4 rounded grid grid-cols-3 gap-4">
-                        <div><strong>Vida:</strong> {character.healthy_points}</div>
-                        <div><strong>Sanidade:</strong> {character.sanity_points}</div>
-                        <div><strong>Pontos de Esforço:</strong> {character.effort_points}</div>
-                    </div>
-
-                    {/* Atributos */}
-                    <div className="bg-zinc-900 p-4 rounded grid grid-cols-5 gap-4">
-                        <div><strong>Agilidade:</strong> {character.atrib_agility}</div>
-                        <div><strong>Intelecto:</strong> {character.atrib_intellect}</div>
-                        <div><strong>Vigor:</strong> {character.atrib_vitallity}</div>
-                        <div><strong>Presença:</strong> {character.atrib_presence}</div>
-                        <div><strong>Força:</strong> {character.atrib_strength}</div>
+                        {/* Card Perícias */}
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
+                            <h1 className="text-blue-400 font-smalltitle text-2xl">Perícias</h1>
+                            <div className="text-zinc-300 font-text">
+                                Em breve.
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -404,6 +506,15 @@ export default function CharacterSheet() {
                 onClose={() => setIsEditOpen(false)}
                 onChange={handleEditChange}
                 onSubmit={handleEditSubmit}
+            />
+
+            <StatusEditModal
+                isOpen={isStatusEditOpen}
+                form={statusForm}
+                isSaving={isSavingStatus}
+                onClose={() => setIsStatusEditOpen(false)}
+                onChange={handleStatusEditChange}
+                onSubmit={handleStatusEditSubmit}
             />
         </MainLayout>
     )

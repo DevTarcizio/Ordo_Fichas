@@ -5,7 +5,7 @@ import MainLayout from "../components/MainLayout"
 import AvatarModal from "../components/AvatarModal"
 import FloatingInput from "../components/FloatingInput"
 import FloatingSelect from "../components/FloatingSelect"
-import atributos_img from "../assets/atributos.png"
+import AttributesCard from "../components/AttributesCard"
 import { formatEnum } from "../utils"
 import { origins, classes, ranks, trails, subclasses } from "../constants"
 
@@ -367,54 +367,26 @@ export default function CreateCharacter() {
                                         Atributos
                                     </h2>
 
-                                    <div className="relative w-full flex justify-center">
-                                        <img src={atributos_img} alt="Atributos" className="w-100 h-auto -mt-9"/>
-
-                                        <input 
-                                            name="atrib_agility" 
-                                            type="number"
-                                            value={form.atrib_agility}
-                                            onChange={handleChange} 
-                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                            style={{top: "2%", left: "40.4%"}}
+                                    <div className="w-full flex justify-center">
+                                        <AttributesCard
+                                            mode="edit"
+                                            values={{
+                                                agility: form.atrib_agility,
+                                                intellect: form.atrib_intellect,
+                                                vitallity: form.atrib_vitallity,
+                                                presence: form.atrib_presence,
+                                                strength: form.atrib_strength
+                                            }}
+                                            inputNames={{
+                                                agility: "atrib_agility",
+                                                intellect: "atrib_intellect",
+                                                vitallity: "atrib_vitallity",
+                                                presence: "atrib_presence",
+                                                strength: "atrib_strength"
+                                            }}
+                                            onChange={handleChange}
+                                            className="-mt-9"
                                         />
-
-                                        <input 
-                                            name="atrib_intellect" 
-                                            type="number"
-                                            value={form.atrib_intellect} 
-                                            onChange={handleChange} 
-                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                            style={{top: "26%", left: "66.5%"}}
-                                        />
-
-                                        <input 
-                                            name="atrib_vitallity" 
-                                            type="number"
-                                            value={form.atrib_vitallity} 
-                                            onChange={handleChange} 
-                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                            style={{top: "69%", left: "59.5%"}}
-                                        />
-
-                                        <input 
-                                            name="atrib_presence" 
-                                            type="number"
-                                            value={form.atrib_presence} 
-                                            onChange={handleChange} 
-                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                            style={{top: "69%", left: "21.5%"}}
-                                        />
-
-                                        <input 
-                                            name="atrib_strength" 
-                                            type="number"
-                                            value={form.atrib_strength} 
-                                            onChange={handleChange} 
-                                            className="absolute w-20 h-16 text-5xl text-center rounded font-text"
-                                            style={{top: "26%", left: "13.5%"}}                                    
-                                        />
-
                                     </div>
 
                                 </div>
