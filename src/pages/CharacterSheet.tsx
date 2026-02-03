@@ -3,12 +3,13 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Heart, Brain, Zap } from "lucide-react"
+import { Heart, Brain, Zap, MessageCircleQuestionMark } from "lucide-react"
 import formatEnum from "../utils"
 
 interface Character {
     id: number
     name: string
+    nationality: string
     age: number
     avatar: string
     origin: string
@@ -25,11 +26,15 @@ interface Character {
     sanity_max: number
     effort_points: number
     effort_max: number
+    investigation_points: number
+    investigation_max: number
     atrib_agility: number
     atrib_intellect: number
     atrib_vitallity: number
     atrib_presence: number
     atrib_strength: number
+    displacement: number
+    PE_per_round: number
 }
 
 export default function CharacterSheet() {
@@ -45,6 +50,8 @@ export default function CharacterSheet() {
                 const response = await api.get(`/characters/${id}`, {
                     headers: { Authorization: `Bearer ${token}`}
                 })
+
+                console.log(response.data)
 
                 const formattedCharacters = {
                     ...response.data,
@@ -65,7 +72,7 @@ export default function CharacterSheet() {
     }, [id, token])
 
     async function updateStatus(
-        field: "healthy_points" | "sanity_points" | "effort_points",
+        field: "healthy_points" | "sanity_points" | "effort_points" | "investigation_points",
         newValue: number
     ) {
         try {
@@ -146,33 +153,48 @@ export default function CharacterSheet() {
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 text-sm font-text">Idade</span>
-                                    <span className="text-white font-text">{character.age}</span>
+                                    <span className="text-zinc-300 font-text">Idade</span>
+                                    <span className="text-white font-text text-lg">{character.age}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 text-sm font-text">Origem</span>
-                                    <span className="text-white font-text">{character.origin}</span>
+                                    <span className="text-zinc-300 font-text">Nacionalide</span>
+                                    <span className="text-white font-text text-lg">{character.nationality}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 text-sm font-text">Classe</span>
-                                    <span className="text-white font-text">{character.character_class}</span>
+                                    <span className="text-zinc-300 font-text">Origem</span>
+                                    <span className="text-white font-text text-lg">{character.origin}</span>
+                                </div>
+
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 font-text">Classe</span>
+                                    <span className="text-white font-text text-lg">{character.character_class}</span>
                                 </div>
                                 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 text-sm font-text">Subclasse</span>
-                                    <span className="text-white font-text">{character.subclass}</span>
+                                    <span className="text-zinc-300 font-text">Subclasse</span>
+                                    <span className="text-white font-text text-lg">{character.subclass}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 text-sm font-text">Trilha</span>
-                                    <span className="text-white font-text">{character.trail}</span>
+                                    <span className="text-zinc-300 font-text">Trilha</span>
+                                    <span className="text-white font-text text-lg">{character.trail}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 text-sm font-text">Patente</span>
-                                    <span className="text-white font-text">{character.rank}</span>
+                                    <span className="text-zinc-300 font-text">Patente</span>
+                                    <span className="text-white font-text text-lg">{character.rank}</span>
+                                </div>
+
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 font-text">PE por rodada</span>
+                                    <span className="text-white font-text text-lg">{character.PE_per_round}</span>
+                                </div>
+
+                                <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                    <span className="text-zinc-300 font-text">Deslocamento</span>
+                                    <span className="text-white font-text text-lg">{character.displacement}</span>
                                 </div>
 
                                 {/* Bloco NEX */}
@@ -282,6 +304,31 @@ export default function CharacterSheet() {
                                             return {
                                                 ...prev,
                                                 effort_points: newValue
+                                            }
+                                        })
+                                    }}
+                                />  
+
+                                <StatusBar 
+                                    label="Investigação"
+                                    icon={MessageCircleQuestionMark}
+                                    current={character.investigation_points}
+                                    max={character.investigation_max}
+                                    gradient="bg-gradient-to-r from-green-700 to-green-500"
+                                    onChange={(delta) => {
+                                        setCharacter(prev => {
+                                            if (!prev) return prev
+
+                                            const newValue = Math.min(
+                                                prev.investigation_max,
+                                                Math.max(0, prev.investigation_points + delta)
+                                            )
+
+                                            updateStatus("investigation_points", newValue)
+
+                                            return {
+                                                ...prev,
+                                                investigation_points: newValue
                                             }
                                         })
                                     }}
