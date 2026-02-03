@@ -3,10 +3,12 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Brain, Heart, MessageCircleQuestionMark, Zap } from "lucide-react"
+import { Brain, Heart, MessageCircleQuestionMark, Pencil, Zap } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { formatEnum } from "../utils"
+import { formatEnum, reverseFormatEnum } from "../utils"
 import type { CharacterDetails } from "../types/character"
+import CharacterEditModal from "../components/CharacterEditModal"
+import type { EditForm } from "../components/CharacterEditModal"
 
 type StatusField = "healthy_points" | "sanity_points" | "effort_points" | "investigation_points"
 
@@ -55,6 +57,11 @@ function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value))
 }
 
+function toNumber(value: string, fallback: number) {
+    const parsed = Number(value)
+    return Number.isNaN(parsed) ? fallback : parsed
+}
+
 function getAvatarSrc(character: CharacterDetails) {
     const lifePercent = character.healthy_points / character.healthy_max
     const sanityPercent = character.sanity_points / character.sanity_max
@@ -82,6 +89,9 @@ export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
     const [character, setCharacter] = useState<CharacterDetails | null>(null)
+    const [isEditOpen, setIsEditOpen] = useState(false)
+    const [editForm, setEditForm] = useState<EditForm | null>(null)
+    const [isSaving, setIsSaving] = useState(false)
     const token = localStorage.getItem("token")
 
     useEffect(() => {
@@ -139,6 +149,91 @@ export default function CharacterSheet() {
         })
     }
 
+    const openEditModal = () => {
+        if (!character) return
+
+        setEditForm({
+            name: character.name,
+            age: String(character.age),
+            nationality: character.nationality,
+            origin: reverseFormatEnum(character.origin),
+            character_class: reverseFormatEnum(character.character_class),
+            subclass: reverseFormatEnum(character.subclass),
+            trail: reverseFormatEnum(character.trail),
+            rank: reverseFormatEnum(character.rank),
+            nex_total: String(character.nex_total),
+            nex_class: String(character.nex_class),
+            nex_subclass: String(character.nex_subclass),
+            PE_per_round: String(character.PE_per_round),
+            displacement: String(character.displacement)
+        })
+        setIsEditOpen(true)
+    }
+
+    const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        const { name, value } = e.target
+
+        setEditForm(prev => {
+            if (!prev) return prev
+            return { ...prev, [name]: value }
+        })
+    }
+
+    const handleEditSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+
+        if (!character || !editForm) return
+
+        setIsSaving(true)
+
+        const payload = {
+            name: editForm.name.trim(),
+            age: toNumber(editForm.age, character.age),
+            nationality: editForm.nationality.trim(),
+            origin: editForm.origin,
+            character_class: editForm.character_class,
+            subclass: editForm.subclass,
+            trail: editForm.trail,
+            rank: editForm.rank,
+            nex_total: toNumber(editForm.nex_total, character.nex_total),
+            nex_class: toNumber(editForm.nex_class, character.nex_class),
+            nex_subclass: toNumber(editForm.nex_subclass, character.nex_subclass),
+            PE_per_round: toNumber(editForm.PE_per_round, character.PE_per_round),
+            displacement: toNumber(editForm.displacement, character.displacement)
+        }
+
+        try {
+            await api.patch(
+                `/characters/${character.id}`,
+                payload,
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+
+            setCharacter(prev => {
+                if (!prev) return prev
+
+                return {
+                    ...prev,
+                    ...payload,
+                    origin: formatEnum(payload.origin),
+                    character_class: formatEnum(payload.character_class),
+                    subclass: formatEnum(payload.subclass),
+                    trail: formatEnum(payload.trail),
+                    rank: formatEnum(payload.rank)
+                }
+            })
+
+            setIsEditOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao atualizar personagem")
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
     if (!character) {
         return (
             <MainLayout>
@@ -173,6 +268,13 @@ export default function CharacterSheet() {
                                 <h1 className="text-blue-400 font-smalltitle mb-4 text-2xl">
                                     Informações Principais
                                 </h1>
+                                <button
+                                    onClick={openEditModal}
+                                    className="mb-4 px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded flex items-center gap-2 font-text"
+                                    title="Editar informações"
+                                >
+                                    <Pencil size={18} />
+                                </button>
                             </div>
 
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -294,6 +396,15 @@ export default function CharacterSheet() {
                     </div>
                 </div>
             </div>
+
+            <CharacterEditModal
+                isOpen={isEditOpen}
+                editForm={editForm}
+                isSaving={isSaving}
+                onClose={() => setIsEditOpen(false)}
+                onChange={handleEditChange}
+                onSubmit={handleEditSubmit}
+            />
         </MainLayout>
     )
 }
