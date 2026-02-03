@@ -29,10 +29,11 @@ export default function Dashboard() {
     const navigate = useNavigate()
     const [characters, setCharacters] = useState<Character[]>([])
 
-    if (!user) {
-        navigate("/")
-        return null
-    }
+    useEffect(() => {
+        if (!user) {
+            navigate("/")
+        }
+    }, [navigate, user])
 
     useEffect(() => {
         async function getCharacters() {
@@ -54,7 +55,11 @@ export default function Dashboard() {
         }
 
         getCharacters()
-    }, [])
+    }, [user])
+
+    if (!user) {
+        return null
+    }
 
     async function handleDeleteCharacter(id: number) {
         const confirmDelete =  window.confirm("Tem certeza que deseja excluir esse personagem?")
@@ -84,9 +89,9 @@ export default function Dashboard() {
                             Não existem personagens criados
                         </p>
                     ) : (
-                        characters.map((char, index) => (
+                        characters.map((char) => (
                             <div
-                                key={char.id ?? index}
+                                key={char.id}
                                 className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-1 w-full"
                             >   
                                 <div className="flex justify-between items-center">
@@ -172,7 +177,7 @@ export default function Dashboard() {
                 <button
                     onClick={() => {
                         logout()
-                        navigate("/login")
+                        navigate("/")
                     }}
                     className="px-6 py-3 rounded-lg bg-red-600 hover:bg-red-700 transition font-text"
                 >
