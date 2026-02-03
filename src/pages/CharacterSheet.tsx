@@ -3,10 +3,10 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Heart, Brain, Zap, MessageCircleQuestionMark } from "lucide-react"
+import { Heart, Brain, Zap, MessageCircleQuestionMark, Pencil } from "lucide-react"
 import formatEnum from "../utils"
 
-interface Character {
+export interface Character {
     id: number
     name: string
     nationality: string
@@ -41,6 +41,9 @@ export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
     const [character, setCharacter] = useState<Character | null>(null)
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+    const [editableFields, setEditableFields] = useState<Character | null>(null)
+    const [currentFields, setCurrentFields] = useState<(keyof Character)[]>([])
     const token = localStorage.getItem("token")
 
 
@@ -50,8 +53,6 @@ export default function CharacterSheet() {
                 const response = await api.get(`/characters/${id}`, {
                     headers: { Authorization: `Bearer ${token}`}
                 })
-
-                console.log(response.data)
 
                 const formattedCharacters = {
                     ...response.data,
@@ -124,6 +125,30 @@ export default function CharacterSheet() {
         return `/avatars/${character.avatar}/${character.avatar}.png`
     }
 
+    const handleUpdate = (updatedData: Partial<Character>) => {
+
+        setCharacter(prev => {
+            if (!prev) return prev;
+
+            const formattedData = { 
+                ...updatedData,
+                origin: updatedData.origin ? formatEnum(updatedData.origin) : prev.origin,
+                character_class: updatedData.character_class ? formatEnum(updatedData.character_class) : prev.character_class,
+                rank: updatedData.rank ? formatEnum(updatedData.rank) : prev.rank,
+                subclass: updatedData.subclass ? formatEnum(updatedData.subclass) : prev.subclass,
+                trail: updatedData.trail ? formatEnum(updatedData.trail) : prev.trail,
+            }
+
+            return { ...prev, ...formattedData }
+        })
+    }
+
+    const openEditModal = (fields: (keyof Character)[]) => {
+        setEditableFields(character)
+        setCurrentFields(fields)
+        setIsEditModalOpen(true)
+    }
+
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
@@ -146,9 +171,11 @@ export default function CharacterSheet() {
 
                         {/* Card informações */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md">
-                            <h1 className="text-blue-400 font-smalltitle mb-4 text-2xl">
-                                Informações Principais
-                            </h1>
+                            <div className="flex justify-between items-center">
+                                <h1 className="text-blue-400 font-smalltitle mb-4 text-2xl">
+                                    Informações Principais
+                                </h1>
+                            </div>
 
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                 
@@ -158,7 +185,7 @@ export default function CharacterSheet() {
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 font-text">Nacionalide</span>
+                                    <span className="text-zinc-300 font-text">Nacionalidade</span>
                                     <span className="text-white font-text text-lg">{character.nationality}</span>
                                 </div>
 
@@ -235,7 +262,7 @@ export default function CharacterSheet() {
                             <div className="flex flex-col gap-3">
                            
                                 <StatusBar 
-                                    label="Vida"
+                                    label="VIDA"
                                     icon={Heart}
                                     current={character.healthy_points}
                                     max={character.healthy_max}
@@ -260,7 +287,7 @@ export default function CharacterSheet() {
                                 /> 
 
                                 <StatusBar 
-                                    label="Sanidade"
+                                    label="SANIDADE"
                                     icon={Brain}
                                     current={character.sanity_points}
                                     max={character.sanity_max}
@@ -285,7 +312,7 @@ export default function CharacterSheet() {
                                 /> 
 
                                 <StatusBar 
-                                    label="Esforço"
+                                    label="ESFORÇO"
                                     icon={Zap}
                                     current={character.effort_points}
                                     max={character.effort_max}
@@ -310,7 +337,7 @@ export default function CharacterSheet() {
                                 />  
 
                                 <StatusBar 
-                                    label="Investigação"
+                                    label="INVESTIGAÇÃO"
                                     icon={MessageCircleQuestionMark}
                                     current={character.investigation_points}
                                     max={character.investigation_max}
@@ -360,6 +387,7 @@ export default function CharacterSheet() {
                         <div><strong>Força:</strong> {character.atrib_strength}</div>
                     </div>
                 </div>
+
             </div>
         </MainLayout>
     )

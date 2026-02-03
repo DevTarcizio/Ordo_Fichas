@@ -5,6 +5,7 @@ export default {
         bigtitle: ["BigTitles", "sans-serif"],
         smalltitle: ["SmallTitles", "sans-serif"],
         text: ["Text", "sans-serif"],
+        statusbar: ["StatusBar", "sans-serif"]
       },
     },
   },

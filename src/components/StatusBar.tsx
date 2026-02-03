@@ -25,7 +25,7 @@ export default function StatusBar({ label, current, max, icon: Icon, gradient, o
                         onClick={() => onChange(-5)}    
                     >
                         <ChevronsLeft size={16}/>
-                        -5
+                        - 5
                     </button>
 
                     <button 
@@ -33,7 +33,7 @@ export default function StatusBar({ label, current, max, icon: Icon, gradient, o
                         onClick={() => onChange(-1)}
                     >
                         <ChevronLeft size={16}/>
-                        -1
+                        - 1
                     </button>
                 </div>  
 
@@ -47,7 +47,7 @@ export default function StatusBar({ label, current, max, icon: Icon, gradient, o
                         className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm"
                         onClick={() => onChange(1)}
                     >
-                        +1
+                        + 1
                         <ChevronRight size={16}/>
                     </button>
 
@@ -55,7 +55,7 @@ export default function StatusBar({ label, current, max, icon: Icon, gradient, o
                         className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm"
                         onClick={() => onChange(5)}
                     >
-                        +5
+                        + 5
                         <ChevronsRight size={16}/>
                     </button>
                 </div>
