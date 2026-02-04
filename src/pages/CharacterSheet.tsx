@@ -16,6 +16,8 @@ import AttributesEditModal from "../components/AttributesEditModal"
 import type { AttributesEditForm } from "../components/AttributesEditModal"
 import ExpertiseRollModal from "../components/ExpertiseRollModal"
 import ExpertiseEditModal from "../components/ExpertiseEditModal"
+import LevelUpModal from "../components/LevelUpModal"
+import LevelUpResultModal from "../components/LevelUpResultModal"
 
 type StatusField = "healthy_points" | "sanity_points" | "effort_points" | "investigation_points"
 
@@ -232,6 +234,12 @@ export default function CharacterSheet() {
     const [isExpertiseEditOpen, setIsExpertiseEditOpen] = useState(false)
     const [expertiseForm, setExpertiseForm] = useState<ExpertiseEditForm | null>(null)
     const [isSavingExpertise, setIsSavingExpertise] = useState(false)
+    const [isLevelUpOpen, setIsLevelUpOpen] = useState(false)
+    const [isLevelingUp, setIsLevelingUp] = useState(false)
+    const [levelUpDiff, setLevelUpDiff] = useState<{
+        old: CharacterDetails
+        new: CharacterDetails
+    } | null>(null)
     const token = localStorage.getItem("token")
 
     useEffect(() => {
@@ -618,6 +626,69 @@ export default function CharacterSheet() {
         setIsRolling(false)
     }
 
+    const handleOpenLevelUp = () => {
+        if (!character) return
+
+        if (character.nex_total >= 100) {
+            alert("Nex Máximo Atingido")
+            return
+        }
+
+        setIsLevelUpOpen(true)
+    }
+
+    const handleConfirmLevelUp = async (type: "class" | "subclass") => {
+        if (!character) return
+
+        setIsLevelingUp(true)
+
+        const oldCharacter = structuredClone(character)
+
+        const payload = type === "class" ? {
+            nex_total: character.nex_total + 5,
+            nex_class: character.nex_class + 5
+        } : {
+            nex_total: character.nex_total + 5,
+            nex_subclass: character.nex_subclass + 5
+        }
+
+        try {
+            const response = await api.patch(
+                `characters/${character.id}/`,
+                payload,
+                {
+                    headers: {Authorization: `Bearer ${token}`}
+                }
+            )
+
+            const updated = response.data
+
+            const newCharacter = {
+                ...oldCharacter,
+                ...updated,
+                origin: formatEnum(updated.origin ?? oldCharacter.origin),
+                character_class: formatEnum(updated.character_class ?? oldCharacter.character_class),
+                subclass: formatEnum(updated.subclass ?? oldCharacter.subclass),
+                trail: formatEnum(updated.trail ?? oldCharacter.trail),
+                rank: formatEnum(updated.rank ?? oldCharacter.rank)
+            }
+
+            setCharacter(newCharacter)
+
+            setLevelUpDiff({
+                old: oldCharacter,
+                new: newCharacter
+            })
+
+            setIsLevelUpOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao subir de nivel")
+        } finally {
+            setIsLevelingUp(false)
+        }
+    }
+
     const handleEditSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
@@ -853,6 +924,15 @@ export default function CharacterSheet() {
                                     onRollAttribute={handleRollAttribute}
                                 />
                             </div>
+
+                            <div className="flex justify-center mt-4">
+                                <button
+                                    onClick={handleOpenLevelUp}
+                                    className="px-6 py-3 bg-green-500 hover:bg-green-600 text-black rounded-lg font-text text-lg shadow-md mt-4"
+                                >
+                                    Transcender
+                                </button>
+                            </div>
                         </div>
 
                         {/* Card Proficiências */}
@@ -1006,6 +1086,18 @@ export default function CharacterSheet() {
                 onClose={() => setIsExpertiseEditOpen(false)}
                 onChange={handleExpertiseEditChange}
                 onSubmit={handleExpertiseEditSubmit}
+            />
+
+            <LevelUpModal 
+                isOpen={isLevelUpOpen}
+                isLoading={isLevelingUp}
+                onClose={() => setIsLevelUpOpen(false)}
+                onChoose={handleConfirmLevelUp}
+            />
+
+            <LevelUpResultModal 
+                diff={levelUpDiff}
+                onClose={() => setLevelUpDiff(null)}
             />
         </MainLayout>
     )

@@ -30,10 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshLoginRef = useRef<(oldToken: string) => Promise<void>>()
     const storedToken = localStorage.getItem("token")
     const [token, setToken] = useState<string | null>(storedToken)
-    const [user, setUser] = useState<User | null>(() => {
-        if (storedToken) return decodeToken(storedToken)
-        return null
-    })
+    const [user, setUser] = useState<User | null>(null)
 
     const clearRefreshTimer = useCallback(() => {
         if (refreshTimeout.current) {
@@ -101,17 +98,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (stored) {
             try {
                 const decoded = jwtDecode<AuthTokenPayload>(stored)
-                if (decoded.sub && decoded.role && decoded.exp) {
+                const expMs = decoded.exp * 1000
+                const now = Date.now()
+
+                if (decoded.sub && decoded.role && decoded.exp && expMs > now) {
                     setUser({ email: decoded.sub, role: decoded.role })
                     setToken(stored)
                     scheduleRefresh(stored)
                 } else {
-                    throw new Error("Token inválido")
+                    void refreshLoginRef.current?.(stored)
                 }
             } catch {
-                localStorage.removeItem("token")
-                setUser(null)
-                setToken(null)
+                void refreshLoginRef.current?.(stored)
             }
         }
 

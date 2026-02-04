@@ -28,28 +28,10 @@ export async function login(email: string, password: string) {
     return res.data
 }
 
-// Response: tenta refresh automático
+// Response: erros são tratados pelo AuthContext (refresh)
 api.interceptors.response.use(
     (response) => response,
-    async (error) => {
-        if (error.response?.status === 401) {
-            try {
-                const res = await api.post("/auth/refresh_token")
-                const newToken = res.data.access_token
-
-                localStorage.setItem("token", newToken)
-
-                error.config.headers = error.config.headers ?? {}
-                error.config.headers.Authorization = `Bearer ${newToken}`
-                return api(error.config)
-            } catch {
-                localStorage.removeItem("token")
-                window.location.href = "/"
-            }
-        }
-
-        return Promise.reject(error)
-    }
+    (error) => Promise.reject(error)
 )
 
 export async function register(username: string, email: string, password: string, role: string) {
