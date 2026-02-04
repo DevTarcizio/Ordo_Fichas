@@ -1,14 +1,49 @@
-﻿export function formatEnum(value: string): string {
+export function formatEnum(value: string): string {
     if (!value) return ""
+    const accentMap: Record<string, string> = {
+        ciencia: "Ciência",
+        investigacao: "Investigação",
+        intuicao: "Intuição",
+        religiao: "Religião",
+        profissao: "Profissão",
+        sobrevivencia: "Sobrevivência",
+        tatica: "Tática",
+        acrobacias: "Acrobacias",
+        adestramento: "Adestramento",
+        artes: "Artes",
+        atletismo: "Atletismo",
+        atualidades: "Atualidades",
+        crime: "Crime",
+        diplomacia: "Diplomacia",
+        enganacao: "Enganação",
+        fortitude: "Fortitude",
+        furtividade: "Furtividade",
+        iniciativa: "Iniciativa",
+        intimidacao: "Intimidação",
+        luta: "Luta",
+        medicina: "Medicina",
+        ocultismo: "Ocultismo",
+        pilotagem: "Pilotagem",
+        pontaria: "Pontaria",
+        reflexos: "Reflexos",
+        sociedade: "Sociedade",
+        escutar: "Escutar",
+        observar: "Observar",
+        vontade: "Vontade"
+    }
     return value
         .split("_")
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .map(word => {
+            const lower = word.toLowerCase()
+            if (accentMap[lower]) return accentMap[lower]
+            return lower.charAt(0).toUpperCase() + lower.slice(1)
+        })
         .join(" ")
 }
 
 export function reverseFormatEnum(display: string): string {
     return display
-        .trim()               // remove espaços extras
-        .toLowerCase()        // deixa tudo em minúsculas
-        .replace(/\s+/g, "_") // substitui espaços por underline
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, "_")
 }

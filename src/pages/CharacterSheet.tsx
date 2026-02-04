@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Brain, Heart, MessageCircleQuestionMark, Pencil, Zap } from "lucide-react"
+import { Brain, Heart, Info, MessageCircleQuestionMark, Pencil, Zap } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
 import type { CharacterDetails } from "../types/character"
@@ -14,6 +14,8 @@ import type { StatusEditForm } from "../components/StatusEditModal"
 import AttributesCard from "../components/AttributesCard"
 import AttributesEditModal from "../components/AttributesEditModal"
 import type { AttributesEditForm } from "../components/AttributesEditModal"
+import ExpertiseRollModal from "../components/ExpertiseRollModal"
+import ExpertiseEditModal from "../components/ExpertiseEditModal"
 
 type StatusField = "healthy_points" | "sanity_points" | "effort_points" | "investigation_points"
 
@@ -25,6 +27,126 @@ type StatusConfig = {
     field: StatusField
     maxField: StatusMaxField
     gradient: string
+}
+
+type ExpertiseStats = {
+    treino: number
+    extra: number
+    total: number
+}
+
+type ExpertiseMap = Record<string, ExpertiseStats>
+type ExpertiseEditForm = Record<string, { treino: string; extra: string }>
+
+type ExpertiseRollResult = {
+    expertise: string
+    attribute: string
+    attribute_value: number
+    dice_count: number
+    dice: number[]
+    treino: number
+    extra: number
+    bonus: number
+    total: number
+}
+
+const expertiseAttributeMap: Record<string, string> = {
+    acrobacias: "atrib_agility",
+    adestramento: "atrib_presence",
+    artes: "atrib_presence",
+    atletismo: "atrib_strength",
+    atualidades: "atrib_intellect",
+    ciencia: "atrib_intellect",
+    crime: "atrib_agility",
+    diplomacia: "atrib_presence",
+    enganacao: "atrib_presence",
+    fortitude: "atrib_vitallity",
+    furtividade: "atrib_agility",
+    iniciativa: "atrib_agility",
+    intimidacao: "atrib_presence",
+    intuicao: "atrib_presence",
+    investigacao: "atrib_intellect",
+    luta: "atrib_strength",
+    medicina: "atrib_intellect",
+    ocultismo: "atrib_intellect",
+    pilotagem: "atrib_agility",
+    pontaria: "atrib_agility",
+    profissao: "atrib_intellect",
+    reflexos: "atrib_agility",
+    religiao: "atrib_presence",
+    sobrevivencia: "atrib_intellect",
+    tatica: "atrib_intellect",
+    tecnologia: "atrib_intellect",
+    vontade: "atrib_presence",
+    sociedade: "atrib_intellect",
+    escutar: "atrib_presence",
+    observar: "atrib_presence"
+}
+
+const expertiseAttributeOrder = [
+    "atrib_agility",
+    "atrib_strength",
+    "atrib_vitallity",
+    "atrib_intellect",
+    "atrib_presence"
+]
+
+const attributeLabelMap: Record<string, string> = {
+    atrib_agility: "Agilidade",
+    atrib_strength: "Força",
+    atrib_vitallity: "Vigor",
+    atrib_intellect: "Intelecto",
+    atrib_presence: "Presença"
+}
+
+const attributeKeyLabelMap: Record<string, string> = {
+    agility: "Agilidade",
+    intellect: "Intelecto",
+    vitallity: "Vigor",
+    presence: "Presença",
+    strength: "Força"
+}
+
+const expertiseLabelMap: Record<string, string> = {
+    acrobacias: "Acrobacias",
+    adestramento: "Adestramento",
+    artes: "Artes",
+    atletismo: "Atletismo",
+    atualidades: "Atualidades",
+    ciencia: "Ci\u00eancia",
+    crime: "Crime",
+    diplomacia: "Diplomacia",
+    enganacao: "Engana\u00e7\u00e3o",
+    fortitude: "Fortitude",
+    furtividade: "Furtividade",
+    iniciativa: "Iniciativa",
+    intimidacao: "Intimida\u00e7\u00e3o",
+    intuicao: "Intui\u00e7\u00e3o",
+    investigacao: "Investiga\u00e7\u00e3o",
+    luta: "Luta",
+    medicina: "Medicina",
+    ocultismo: "Ocultismo",
+    pilotagem: "Pilotagem",
+    pontaria: "Pontaria",
+    profissao: "Profiss\u00e3o",
+    reflexos: "Reflexos",
+    religiao: "Religi\u00e3o",
+    sobrevivencia: "Sobreviv\u00eancia",
+    tatica: "T\u00e1tica",
+    tecnologia: "Tecnologia",
+    vontade: "Vontade",
+    sociedade: "Sociedade",
+    escutar: "Escutar",
+    observar: "Observar"
+}
+
+const treinoColorClass = (treino?: number, extra?: number) => {
+    if ((treino ?? 0) === 0 && (extra ?? 0) > 0) return "text-sky-300"
+    if (treino === 0) return "text-zinc-500"
+    if (treino === 5) return "text-green-400"
+    if (treino === 10) return "text-blue-700"
+    if (treino === 15) return "text-orange-400"
+    return "text-white"
 }
 
 const statusConfigs: StatusConfig[] = [
@@ -103,6 +225,13 @@ export default function CharacterSheet() {
     const [isSaving, setIsSaving] = useState(false)
     const [isSavingStatus, setIsSavingStatus] = useState(false)
     const [isSavingAttributes, setIsSavingAttributes] = useState(false)
+    const [expertise, setExpertise] = useState<ExpertiseMap | null>(null)
+    const [isRollOpen, setIsRollOpen] = useState(false)
+    const [isRolling, setIsRolling] = useState(false)
+    const [rollResult, setRollResult] = useState<ExpertiseRollResult | null>(null)
+    const [isExpertiseEditOpen, setIsExpertiseEditOpen] = useState(false)
+    const [expertiseForm, setExpertiseForm] = useState<ExpertiseEditForm | null>(null)
+    const [isSavingExpertise, setIsSavingExpertise] = useState(false)
     const token = localStorage.getItem("token")
 
     useEffect(() => {
@@ -129,6 +258,21 @@ export default function CharacterSheet() {
 
         fetchCharacter()
     }, [id, token])
+
+    useEffect(() => {
+        const fetchExpertise = async () => {
+            try {
+                const response = await api.get(`/characters/${id}/expertise`)
+                setExpertise(response.data.expertise)
+            } catch (err) {
+                console.error(err)
+            }
+        }
+
+        if (id) {
+            fetchExpertise()
+        }
+    }, [id])
 
     async function updateStatus(field: StatusField, newValue: number) {
         try {
@@ -214,6 +358,19 @@ export default function CharacterSheet() {
         setIsAttributesEditOpen(true)
     }
 
+    const openExpertiseEditModal = () => {
+        const form: ExpertiseEditForm = {}
+        Object.keys(expertiseAttributeMap).forEach((name) => {
+            const stats = expertise?.[name]
+            form[name] = {
+                treino: String(stats?.treino ?? 0),
+                extra: String(stats?.extra ?? 0)
+            }
+        })
+        setExpertiseForm(form)
+        setIsExpertiseEditOpen(true)
+    }
+
     const handleStatusEditChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target
 
@@ -231,6 +388,25 @@ export default function CharacterSheet() {
         setAttributesForm(prev => {
             if (!prev) return prev
             return { ...prev, [name]: value }
+        })
+    }
+
+    const handleExpertiseEditChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target
+        if (!name.endsWith("_treino") && !name.endsWith("_extra")) return
+
+        const key = name.replace(/_(treino|extra)$/, "")
+        const field = name.endsWith("_treino") ? "treino" : "extra"
+
+        setExpertiseForm(prev => {
+            if (!prev) return prev
+            return {
+                ...prev,
+                [key]: {
+                    ...prev[key],
+                    [field]: value
+                }
+            }
         })
     }
 
@@ -339,6 +515,107 @@ export default function CharacterSheet() {
         } finally {
             setIsSavingAttributes(false)
         }
+    }
+
+    const handleExpertiseEditSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+
+        if (!character || !expertiseForm) return
+
+        setIsSavingExpertise(true)
+
+        const payload: Record<string, number> = {}
+        Object.keys(expertiseAttributeMap).forEach((name) => {
+            const current = expertiseForm[name] ?? { treino: "0", extra: "0" }
+            payload[`${name}_treino`] = toNumber(current.treino, 0)
+            payload[`${name}_extra`] = toNumber(current.extra, 0)
+        })
+
+        try {
+            const response = await api.patch(
+                `/characters/${character.id}/`,
+                payload,
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+
+            const updatedCharacter = response.data && Object.keys(response.data).length > 0
+                ? response.data
+                : payload
+
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updatedCharacter,
+                    origin: formatEnum(updatedCharacter.origin ?? prev.origin),
+                    character_class: formatEnum(updatedCharacter.character_class ?? prev.character_class),
+                    subclass: formatEnum(updatedCharacter.subclass ?? prev.subclass),
+                    trail: formatEnum(updatedCharacter.trail ?? prev.trail),
+                    rank: formatEnum(updatedCharacter.rank ?? prev.rank)
+                }
+                return merged
+            })
+
+            const nextExpertise: ExpertiseMap = {}
+            Object.keys(expertiseAttributeMap).forEach((name) => {
+                const current = expertiseForm[name] ?? { treino: "0", extra: "0" }
+                const treino = toNumber(current.treino, 0)
+                const extra = toNumber(current.extra, 0)
+                nextExpertise[name] = {
+                    treino,
+                    extra,
+                    total: treino + extra
+                }
+            })
+            setExpertise(nextExpertise)
+
+            setIsExpertiseEditOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao atualizar perícias")
+        } finally {
+            setIsSavingExpertise(false)
+        }
+    }
+
+    const handleRollExpertise = async (expertiseName: string) => {
+        setIsRollOpen(true)
+        setIsRolling(true)
+        setRollResult(null)
+
+        try {
+            const response = await api.get(
+                `/characters/${character!.id}/expertise/${expertiseName}/roll`
+            )
+            setRollResult(response.data)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao rolar perícia")
+        } finally {
+            setIsRolling(false)
+        }
+    }
+
+    const handleRollAttribute = (attribute: keyof typeof attributeKeyLabelMap, value: number) => {
+        const diceCount = Math.max(0, value)
+        const dice = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 20) + 1)
+        const maxDie = dice.length ? Math.max(...dice) : 0
+
+        setRollResult({
+            expertise: attributeKeyLabelMap[attribute] ?? formatEnum(attribute),
+            attribute: attributeKeyLabelMap[attribute] ?? formatEnum(attribute),
+            attribute_value: value,
+            dice_count: diceCount,
+            dice,
+            treino: 0,
+            extra: 0,
+            bonus: 0,
+            total: maxDie
+        })
+        setIsRollOpen(true)
+        setIsRolling(false)
     }
 
     const handleEditSubmit = async (e: React.FormEvent) => {
@@ -573,15 +850,104 @@ export default function CharacterSheet() {
                                         strength: character.atrib_strength
                                     }}
                                     avatarMarkSrc={`/avatars/${character.avatar}/mark.png`}
+                                    onRollAttribute={handleRollAttribute}
                                 />
                             </div>
                         </div>
 
-                        {/* Card Perícias */}
+                        {/* Card Proficiências */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
-                            <h1 className="text-blue-400 font-smalltitle text-2xl">Perícias</h1>
+                            <h1 className="text-blue-400 font-smalltitle text-2xl">Proficiências</h1>
                             <div className="text-zinc-300 font-text">
                                 Em breve.
+                            </div>
+                        </div>
+
+                        {/* Card Perícias */}
+                        <div className="md:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
+                            <div className="relative bg-black/60 rounded-md py-2 px-4 text-center">
+                                <h1 className="text-blue-400 font-smalltitle text-3xl">Perícias</h1>
+                                <button
+                                    type="button"
+                                    onClick={openExpertiseEditModal}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded flex items-center gap-2 font-text"
+                                    title="Editar perícias"
+                                >
+                                    <Pencil size={18} />
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-5 gap-0">
+                                {expertiseAttributeOrder.map((attr, index) => {
+                                    const items = Object.keys(expertiseAttributeMap)
+                                        .filter((name) => expertiseAttributeMap[name] === attr)
+                                    return (
+                                        <div
+                                            key={attr}
+                                            className={`flex flex-col gap-2 px-3 ${index === 0 ? "" : "border-l-2 border-zinc-500"}`}
+                                        >
+                                            <div className="text-lg text-blue-300 font-smalltitle text-center">
+                                                {attributeLabelMap[attr] ?? formatEnum(attr.replace("atrib_", ""))}
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                {items.map((name) => {
+                                                    const stats = expertise?.[name]
+                                                    return (
+                                                        <div
+                                                            key={name}
+                                                            className="flex items-center gap-2"
+                                                        >
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRollExpertise(name)}
+                                                                className="flex-1 bg-zinc-900/70 border border-zinc-700 rounded p-2 text-left hover:border-blue-500 transition-colors"
+                                                                title="Rolar perícia"
+                                                            >
+                                                                <div className="flex items-start justify-between gap-2 font-text">
+                                                                    <div className="flex flex-col gap-1">
+                                                                    <div className={`text-base font-sans ${treinoColorClass(stats?.treino, stats?.extra)}`}>
+                                                                        {expertiseLabelMap[name] ?? formatEnum(name)}
+                                                                    </div>
+                                                                        <div className="text-sm text-zinc-400 flex flex-col">
+                                                                            <span>Treino: {stats ? stats.treino : "-"}</span>
+                                                                            <span>Extra: {stats ? stats.extra : "-"}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="text-base text-zinc-300 whitespace-nowrap">
+                                                                        Total: +{stats ? stats.total : "-"}
+                                                                    </div>
+                                                                </div>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className="text-blue-400 hover:text-blue-300 transition-colors"
+                                                                title="Informações da perícia"
+                                                            >
+                                                                <Info size={16} />
+                                                            </button>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                            <div className="mt-2 border-t border-zinc-700 pt-2 text-sm text-zinc-300 font-text flex flex-wrap gap-4 justify-center">
+                                <div className="text-zinc-500">
+                                    Destreinado: 0
+                                </div>
+                                <div className="text-green-400">
+                                    Treinado: 5
+                                </div>
+                                <div className="text-blue-700">
+                                    Veterano: 10
+                                </div>
+                                <div className="text-orange-400">
+                                    Expert: 15
+                                </div>
+                                <div className="text-sky-300">
+                                    Apenas Bônus
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -614,6 +980,32 @@ export default function CharacterSheet() {
                 onClose={() => setIsAttributesEditOpen(false)}
                 onChange={handleAttributesEditChange}
                 onSubmit={handleAttributesEditSubmit}
+            />
+
+            <ExpertiseRollModal
+                isOpen={isRollOpen}
+                result={
+                    rollResult
+                        ? {
+                            ...rollResult,
+                            expertise: formatEnum(rollResult.expertise)
+                        }
+                        : null
+                }
+                isRolling={isRolling}
+                onClose={() => setIsRollOpen(false)}
+            />
+
+            <ExpertiseEditModal
+                isOpen={isExpertiseEditOpen}
+                form={expertiseForm}
+                isSaving={isSavingExpertise}
+                expertiseAttributeOrder={expertiseAttributeOrder}
+                expertiseAttributeMap={expertiseAttributeMap}
+                attributeLabelMap={attributeLabelMap}
+                onClose={() => setIsExpertiseEditOpen(false)}
+                onChange={handleExpertiseEditChange}
+                onSubmit={handleExpertiseEditSubmit}
             />
         </MainLayout>
     )

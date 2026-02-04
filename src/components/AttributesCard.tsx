@@ -22,6 +22,7 @@ type Props =
         values: AttributeValues
         avatarMarkSrc?: string
         fontSize?: number
+        onRollAttribute?: (attribute: keyof AttributeValues, value: number) => void
         className?: string
     }
     | {
@@ -83,8 +84,13 @@ export default function AttributesCard(props: Props) {
                             textAnchor="middle"
                             dominantBaseline="middle"
                             alignmentBaseline="middle"
-                            className="fill-white font-text"
+                            className="fill-white font-text cursor-pointer"
                             fontSize={fontSize}
+                            onClick={() => {
+                                if (props.onRollAttribute) {
+                                    props.onRollAttribute("agility", Number(props.values.agility))
+                                }
+                            }}
                         >
                             {props.values.agility}
                         </text>
@@ -95,8 +101,13 @@ export default function AttributesCard(props: Props) {
                             textAnchor="middle"
                             dominantBaseline="middle"
                             alignmentBaseline="middle"
-                            className="fill-white font-text"
+                            className="fill-white font-text cursor-pointer"
                             fontSize={fontSize}
+                            onClick={() => {
+                                if (props.onRollAttribute) {
+                                    props.onRollAttribute("intellect", Number(props.values.intellect))
+                                }
+                            }}
                         >
                             {props.values.intellect}
                         </text>
@@ -107,8 +118,13 @@ export default function AttributesCard(props: Props) {
                             textAnchor="middle"
                             dominantBaseline="middle"
                             alignmentBaseline="middle"
-                            className="fill-white font-text"
+                            className="fill-white font-text cursor-pointer"
                             fontSize={fontSize}
+                            onClick={() => {
+                                if (props.onRollAttribute) {
+                                    props.onRollAttribute("vitallity", Number(props.values.vitallity))
+                                }
+                            }}
                         >
                             {props.values.vitallity}
                         </text>
@@ -119,8 +135,13 @@ export default function AttributesCard(props: Props) {
                             textAnchor="middle"
                             dominantBaseline="middle"
                             alignmentBaseline="middle"
-                            className="fill-white font-text"
+                            className="fill-white font-text cursor-pointer"
                             fontSize={fontSize}
+                            onClick={() => {
+                                if (props.onRollAttribute) {
+                                    props.onRollAttribute("presence", Number(props.values.presence))
+                                }
+                            }}
                         >
                             {props.values.presence}
                         </text>
@@ -131,8 +152,13 @@ export default function AttributesCard(props: Props) {
                             textAnchor="middle"
                             dominantBaseline="middle"
                             alignmentBaseline="middle"
-                            className="fill-white font-text"
+                            className="fill-white font-text cursor-pointer"
                             fontSize={fontSize}
+                            onClick={() => {
+                                if (props.onRollAttribute) {
+                                    props.onRollAttribute("strength", Number(props.values.strength))
+                                }
+                            }}
                         >
                             {props.values.strength}
                         </text>
