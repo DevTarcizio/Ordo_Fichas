@@ -30,7 +30,7 @@ export default function ExpertiseRollModal({
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            className="w-[min(100%-1.5rem,32rem)] rounded-xl border border-cyan-500/60 bg-zinc-900/90 shadow-[0_0_0_1px_rgba(34,211,238,0.1),0_10px_40px_rgba(0,0,0,0.6)] text-white font-sans"
+            className="w-[min(100%-1.5rem,32rem)] font-sans"
         >
             <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
                 <div className="text-sm text-zinc-300">

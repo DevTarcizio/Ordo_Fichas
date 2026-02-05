@@ -1,6 +1,7 @@
 export function formatEnum(value: string): string {
     if (!value) return ""
     const accentMap: Record<string, string> = {
+        class_power: "Poder de Combatente",
         ciencia: "Ciência",
         investigacao: "Investigação",
         intuicao: "Intuição",
@@ -31,7 +32,9 @@ export function formatEnum(value: string): string {
         observar: "Observar",
         vontade: "Vontade"
     }
-    return value
+    const normalized = value.trim().toLowerCase().replace(/\s+/g, "_")
+    if (accentMap[normalized]) return accentMap[normalized]
+    return normalized
         .split("_")
         .map(word => {
             const lower = word.toLowerCase()

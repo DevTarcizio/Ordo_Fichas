@@ -19,7 +19,7 @@ export default function LevelUpModal({
             onClose={onClose}
             closeOnBackdrop={false}
             backdropClassName="bg-black/60"
-            className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 w-96 flex flex-col gap-4 shadow-xl"
+            className="p-6 w-96 flex flex-col gap-4"
         >
             <h2 className="text-xl text-blue-400 font-smalltitle text-center">
                 Transcender

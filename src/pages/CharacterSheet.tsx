@@ -3,9 +3,9 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Info, Pencil } from "lucide-react"
+import { Info, Pencil, Plus, Trash2, X } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
-import type { CharacterDetails } from "../types/character"
+import type { AbilitySummary, CharacterDetails, OriginSummary } from "../types/character"
 import CharacterEditModal from "../components/CharacterEditModal"
 import type { EditForm } from "../components/CharacterEditModal"
 import StatusEditModal from "../components/StatusEditModal"
@@ -17,6 +17,7 @@ import ExpertiseRollModal, { type ExpertiseRollResult } from "../components/Expe
 import ExpertiseEditModal from "../components/ExpertiseEditModal"
 import LevelUpModal from "../components/LevelUpModal"
 import LevelUpResultModal from "../components/LevelUpResultModal"
+import Modal from "../components/Modal"
 import {
     attributeKeyLabelMap,
     attributeLabelMap,
@@ -57,6 +58,53 @@ const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) =>
     return ""
 }
 
+type OriginInfoShape = OriginSummary & {
+    expertise?: unknown
+    expertises?: unknown
+    trained_expertise?: unknown
+}
+
+const getOriginExpertise = (origin: OriginInfoShape) => {
+    const raw =
+        Array.isArray(origin.trained_expertise) ? origin.trained_expertise
+        : Array.isArray(origin.expertise) ? origin.expertise
+        : Array.isArray(origin.expertises) ? origin.expertises
+        : []
+
+    return raw.filter((item): item is string => typeof item === "string")
+}
+
+const getOriginInfo = (origin: CharacterDetails["origin"] | null | undefined): OriginSummary | null => {
+    if (!origin || typeof origin === "string") return null
+    const name = typeof origin.name === "string" ? origin.name : ""
+    const description = typeof origin.description === "string" ? origin.description : undefined
+    const trained_expertise = getOriginExpertise(origin)
+    if (!name && !description && trained_expertise.length === 0) return null
+    return {
+        id: origin.id,
+        name,
+        description,
+        trained_expertise
+    }
+}
+
+const normalizeText = (value: string) =>
+    value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+
+const toAbilityJson = (value: unknown) => {
+    if (value === null || value === undefined) return ""
+    if (typeof value === "string") return value
+    if (typeof value === "number" || typeof value === "boolean") return String(value)
+    try {
+        return JSON.stringify(value, null, 2)
+    } catch {
+        return String(value)
+    }
+}
+
 export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
@@ -79,6 +127,18 @@ export default function CharacterSheet() {
     const [isSavingExpertise, setIsSavingExpertise] = useState(false)
     const [isLevelUpOpen, setIsLevelUpOpen] = useState(false)
     const [isLevelingUp, setIsLevelingUp] = useState(false)
+    const [originInfo, setOriginInfo] = useState<OriginSummary | null>(null)
+    const [isOriginInfoOpen, setIsOriginInfoOpen] = useState(false)
+    const [selectedAbility, setSelectedAbility] = useState<AbilitySummary | null>(null)
+    const [isAbilityModalOpen, setIsAbilityModalOpen] = useState(false)
+    const [abilityOptions, setAbilityOptions] = useState<AbilitySummary[]>([])
+    const [abilitySearch, setAbilitySearch] = useState("")
+    const [isAbilityPickerOpen, setIsAbilityPickerOpen] = useState(false)
+    const [isAbilityOptionsLoading, setIsAbilityOptionsLoading] = useState(false)
+    const [isAddingAbility, setIsAddingAbility] = useState(false)
+    const [removingAbilityId, setRemovingAbilityId] = useState<number | null>(null)
+    const [abilityToRemove, setAbilityToRemove] = useState<AbilitySummary | null>(null)
+    const [isRemoveConfirmOpen, setIsRemoveConfirmOpen] = useState(false)
     const [levelUpDiff, setLevelUpDiff] = useState<{
         old: CharacterDetails
         new: CharacterDetails
@@ -101,6 +161,8 @@ export default function CharacterSheet() {
                     trail: formatEnum(response.data.trail)
                 }
                 setCharacter(formattedCharacter)
+                setOriginInfo(getOriginInfo(response.data.origin))
+                setIsOriginInfoOpen(false)
             } catch (err) {
                 console.error(err)
                 alert("Erro ao buscar personagem")
@@ -124,6 +186,32 @@ export default function CharacterSheet() {
             fetchExpertise()
         }
     }, [id])
+
+    useEffect(() => {
+        if (!isAbilityPickerOpen) return
+        let isMounted = true
+        setIsAbilityOptionsLoading(true)
+        api.get("/abilities/")
+            .then((res) => {
+                const list = Array.isArray(res.data?.abilities)
+                    ? res.data.abilities
+                    : Array.isArray(res.data)
+                        ? res.data
+                        : []
+                if (isMounted) setAbilityOptions(list)
+            })
+            .catch((err) => {
+                console.error(err)
+                if (isMounted) setAbilityOptions([])
+            })
+            .finally(() => {
+                if (isMounted) setIsAbilityOptionsLoading(false)
+            })
+
+        return () => {
+            isMounted = false
+        }
+    }, [isAbilityPickerOpen])
 
     async function updateStatus(field: StatusField, newValue: number) {
         try {
@@ -172,6 +260,17 @@ export default function CharacterSheet() {
 
         setEditForm(baseForm)
         setIsEditOpen(true)
+    }
+
+    const maybeUpdateOriginInfo = (updatedCharacter: { origin?: CharacterDetails["origin"] }) => {
+        if (!Object.prototype.hasOwnProperty.call(updatedCharacter, "origin")) return
+        if (updatedCharacter.origin === null) {
+            setOriginInfo(null)
+            return
+        }
+        if (updatedCharacter.origin && typeof updatedCharacter.origin === "object") {
+            setOriginInfo(getOriginInfo(updatedCharacter.origin))
+        }
     }
 
     const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -313,6 +412,7 @@ export default function CharacterSheet() {
                     investigation_points: clamp(merged.investigation_points, 0, merged.investigation_max)
                 }
             })
+            maybeUpdateOriginInfo(updatedCharacter)
 
             setIsStatusEditOpen(false)
         } catch (err) {
@@ -364,6 +464,7 @@ export default function CharacterSheet() {
                 }
                 return merged
             })
+            maybeUpdateOriginInfo(updatedCharacter)
 
             setIsAttributesEditOpen(false)
         } catch (err) {
@@ -414,6 +515,7 @@ export default function CharacterSheet() {
                 }
                 return merged
             })
+            maybeUpdateOriginInfo(updatedCharacter)
 
             const nextExpertise: ExpertiseMap = {}
             Object.keys(expertiseAttributeMap).forEach((name) => {
@@ -475,6 +577,72 @@ export default function CharacterSheet() {
         setIsRolling(false)
     }
 
+    const handleAddAbility = async (ability: AbilitySummary) => {
+        if (!character) return
+        setIsAddingAbility(true)
+        try {
+            const response = await api.post(
+                `/characters/${character.id}/abilities/${ability.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+            setIsAbilityPickerOpen(false)
+            setAbilitySearch("")
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao adicionar habilidade")
+        } finally {
+            setIsAddingAbility(false)
+        }
+    }
+
+    const handleRemoveAbility = async (ability: AbilitySummary) => {
+        if (!character) return
+        if (originInfo?.id != null && ability.origin_id === originInfo.id) {
+            alert("Não é possível remover a habilidade de origem.")
+            return
+        }
+        setRemovingAbilityId(ability.id)
+        try {
+            const response = await api.delete(
+                `/characters/${character.id}/abilities/${ability.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao remover habilidade")
+        } finally {
+            setRemovingAbilityId(null)
+        }
+    }
+
     const handleOpenLevelUp = () => {
         if (!character) return
 
@@ -523,6 +691,7 @@ export default function CharacterSheet() {
             }
 
             setCharacter(newCharacter)
+            maybeUpdateOriginInfo(updated)
 
             setLevelUpDiff({
                 old: oldCharacter,
@@ -585,6 +754,7 @@ export default function CharacterSheet() {
 
                 return merged
             })
+            maybeUpdateOriginInfo(updatedCharacter)
 
             setIsEditOpen(false)
         } catch (err) {
@@ -595,6 +765,16 @@ export default function CharacterSheet() {
         }
     }
 
+    const originDescription = originInfo?.description?.trim()
+    const originExpertiseLabels = Array.from(
+        new Set(
+            (originInfo?.trained_expertise ?? []).map((name) => {
+                const key = name.trim().toLowerCase()
+                return expertiseLabelMap[key] ?? formatEnum(key)
+            })
+        )
+    )
+
     if (!character) {
         return (
             <MainLayout>
@@ -604,6 +784,124 @@ export default function CharacterSheet() {
             </MainLayout>
         )
     }
+
+    const originLabel =
+        typeof character.origin === "string"
+            ? character.origin
+            : formatEnum(getOriginName(character.origin))
+    const abilities = (character.abilities ?? []).slice().sort((a, b) =>
+        a.name.localeCompare(b.name, "pt-BR")
+    )
+    const proficiencies = (character.proficiencies ?? []).slice().sort((a, b) =>
+        a.name.localeCompare(b.name, "pt-BR")
+    )
+    const trainedExpertise = new Set(
+        Object.entries(expertise ?? {})
+            .filter(([, stats]) => (stats?.treino ?? 0) > 0)
+            .map(([name]) => name)
+    )
+    const abilityNameSet = new Set(abilities.map((ability) => normalizeText(ability.name)))
+    const resistanceBonus = character.resistance_bonus ?? 0
+    const assignedAbilityIds = new Set(abilities.map((ability) => ability.id))
+    const abilitySearchTerm = abilitySearch.trim().toLowerCase()
+    const attributeValueMap: Record<string, number> = {
+        strength: character.atrib_strength,
+        agility: character.atrib_agility,
+        intellect: character.atrib_intellect,
+        presence: character.atrib_presence,
+        vitallity: character.atrib_vitallity
+    }
+
+    const getAbilityRequirementIssues = (ability: AbilitySummary) => {
+        const rawRequirements = ability.requirements as unknown
+        if (!rawRequirements) return []
+        if (!Array.isArray(rawRequirements)) return ["Requisitos especiais"]
+
+        const issues: string[] = []
+        rawRequirements.forEach((req) => {
+            const requirement = req as Record<string, unknown>
+            const type = typeof requirement.type === "string" ? requirement.type : ""
+
+            if (type === "attribute_min") {
+                const attribute = typeof requirement.attribute === "string" ? requirement.attribute : ""
+                const requiredValue = typeof requirement.value === "number" ? requirement.value : 0
+                const currentValue = attributeValueMap[attribute] ?? 0
+                if (currentValue < requiredValue) {
+                    const label = attributeKeyLabelMap[attribute as keyof typeof attributeKeyLabelMap]
+                        ?? formatEnum(attribute)
+                    issues.push(`${label} ${currentValue}/${requiredValue}`)
+                }
+                return
+            }
+
+            if (type === "nex_class_min") {
+                const requiredValue = typeof requirement.value === "number" ? requirement.value : 0
+                if (character.nex_class < requiredValue) {
+                    issues.push(`NEX Classe ${character.nex_class}/${requiredValue}`)
+                }
+                return
+            }
+
+            if (type === "nex_total_min") {
+                const requiredValue = typeof requirement.value === "number" ? requirement.value : 0
+                if (character.nex_total < requiredValue) {
+                    issues.push(`NEX Total ${character.nex_total}/${requiredValue}`)
+                }
+                return
+            }
+
+            if (type === "expertise_trained") {
+                const name = typeof requirement.name === "string" ? requirement.name : ""
+                if (!name || !trainedExpertise.has(name)) {
+                    const label = expertiseLabelMap[name] ?? formatEnum(name)
+                    issues.push(`Treinar ${label}`)
+                }
+                return
+            }
+
+            if (type === "expertise_any_trained") {
+                const names = Array.isArray(requirement.names)
+                    ? requirement.names.filter((item) => typeof item === "string")
+                    : []
+                const hasAny = names.some((name) => trainedExpertise.has(name))
+                if (!hasAny && names.length > 0) {
+                    const labels = names.map((name) => expertiseLabelMap[name] ?? formatEnum(name))
+                    issues.push(`Treinar ${labels.join(" ou ")}`)
+                }
+                return
+            }
+
+            if (type === "ability_required") {
+                const name = typeof requirement.name === "string" ? requirement.name : ""
+                if (!name || !abilityNameSet.has(normalizeText(name))) {
+                    issues.push(`Requer ${name}`)
+                }
+                return
+            }
+
+            if (type) {
+                issues.push("Requisitos especiais")
+            }
+        })
+
+        return issues
+    }
+    const availableAbilities = abilityOptions
+        .filter((ability) => ability.origin_id == null)
+        .filter((ability) => !assignedAbilityIds.has(ability.id))
+        .filter((ability) => {
+            if (!abilitySearchTerm) return true
+            return ability.name.toLowerCase().includes(abilitySearchTerm)
+        })
+    const selectedAbilityRequirements = selectedAbility?.requirements ?? []
+    const selectedAbilityRequirementsText =
+        selectedAbilityRequirements.length > 0
+            ? toAbilityJson(selectedAbilityRequirements)
+            : ""
+    const selectedAbilityEffectText =
+        selectedAbility && selectedAbility.effect && Object.keys(selectedAbility.effect).length > 0
+            ? toAbilityJson(selectedAbility.effect)
+            : ""
 
     return (
         <MainLayout>
@@ -650,8 +948,19 @@ export default function CharacterSheet() {
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 font-text">Origem</span>
-                                    <span className="text-white font-text text-lg">{character.origin}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-zinc-300 font-text">Origem</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsOriginInfoOpen(true)}
+                                            className="text-blue-400 hover:text-blue-300 transition-colors"
+                                            title="Detalhes da origem"
+                                            aria-label="Detalhes da origem"
+                                        >
+                                            <Info size={16} />
+                                        </button>
+                                    </div>
+                                    <span className="text-white font-text text-lg">{originLabel}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
@@ -768,6 +1077,11 @@ export default function CharacterSheet() {
                                         </div>
                                     </div>
                                 </div>
+                                {resistanceBonus > 0 && (
+                                    <div className="mt-3 text-center text-sm text-zinc-300 font-text">
+                                        Testes de Resistência +{resistanceBonus}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -810,12 +1124,120 @@ export default function CharacterSheet() {
                             </div>
                         </div>
 
+                        {/* Card Habilidades */}
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <h1 className="text-blue-400 font-smalltitle text-2xl">Habilidades</h1>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsAbilityPickerOpen(true)}
+                                    className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-black rounded flex items-center gap-2 font-text"
+                                >
+                                    <Plus size={16} />
+                                    Adicionar
+                                </button>
+                            </div>
+                            {abilities.length === 0 && (
+                                <div className="text-zinc-300 font-text">
+                                    Nenhuma habilidade registrada.
+                                </div>
+                            )}
+                            {abilities.length > 0 && (
+                                <div className="flex flex-col gap-3">
+                                    {abilities.map((ability) => {
+                                        const isOriginAbility =
+                                            originInfo?.id != null && ability.origin_id === originInfo.id
+                                        const metaParts = [
+                                            ability.is_active ? "Ativa" : "Passiva",
+                                            `PE ${ability.pe_cost ?? 0}`
+                                        ]
+                                        return (
+                                            <div
+                                                key={ability.id}
+                                                className="flex items-center justify-between gap-3 bg-zinc-900/70 border border-zinc-700 rounded-lg p-3"
+                                            >
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-white font-text">
+                                                            {ability.name}
+                                                        </span>
+                                                        {!isOriginAbility && ability.ability_type && (
+                                                            <span className="text-red-400 border border-red-500/40 text-xs px-2 py-0.5 rounded">
+                                                                {formatEnum(ability.ability_type)}
+                                                            </span>
+                                                        )}
+                                                        {isOriginAbility && (
+                                                            <span className="text-emerald-300 border border-emerald-500/40 text-xs px-2 py-0.5 rounded">
+                                                                Origem
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {metaParts.length > 0 && (
+                                                        <span className="text-zinc-400 text-xs font-text">
+                                                            {metaParts.join(" | ")}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedAbility(ability)
+                                                            setIsAbilityModalOpen(true)
+                                                        }}
+                                                        className="text-blue-400 hover:text-blue-300 transition-colors"
+                                                        title="Detalhes da habilidade"
+                                                        aria-label="Detalhes da habilidade"
+                                                    >
+                                                        <Info size={18} />
+                                                    </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setAbilityToRemove(ability)
+                                                                setIsRemoveConfirmOpen(true)
+                                                            }}
+                                                            disabled={
+                                                                removingAbilityId === ability.id || isOriginAbility
+                                                            }
+                                                            className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                                            title={
+                                                                isOriginAbility
+                                                                    ? "Habilidade de origem não pode ser removida"
+                                                                    : "Remover habilidade"
+                                                            }
+                                                            aria-label="Remover habilidade"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
                         {/* Card Proficiências */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
                             <h1 className="text-blue-400 font-smalltitle text-2xl">Proficiências</h1>
-                            <div className="text-zinc-300 font-text">
-                                Em breve.
-                            </div>
+                            {proficiencies.length === 0 && (
+                                <div className="text-zinc-300 font-text">
+                                    Nenhuma proficiência registrada.
+                                </div>
+                            )}
+                            {proficiencies.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                    {proficiencies.map((proficiency) => (
+                                        <span
+                                            key={proficiency.id}
+                                            className="bg-zinc-900/70 border border-zinc-700 text-zinc-200 text-sm font-text px-3 py-1 rounded-full"
+                                        >
+                                            {formatEnum(proficiency.name)}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {/* Card Perícias */}
@@ -928,6 +1350,268 @@ export default function CharacterSheet() {
                 onChange={handleEditChange}
                 onSubmit={handleEditSubmit}
             />
+            <Modal
+                isOpen={isOriginInfoOpen}
+                onClose={() => setIsOriginInfoOpen(false)}
+                className="w-[min(100%-1.5rem,32rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Origem</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsOriginInfoOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    <div className="text-lg text-white">{originLabel}</div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-zinc-400 text-sm">Descrição</span>
+                        <span className="text-zinc-200">
+                            {originDescription
+                                ? originDescription
+                                : "Descrição da origem não disponível."}
+                        </span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-zinc-400 text-sm">Perícias treinadas</span>
+                        <span className="text-zinc-200">
+                            {originExpertiseLabels.length > 0
+                                ? originExpertiseLabels.join(", ")
+                                : "Sem perícias treinadas registradas."}
+                        </span>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isAbilityModalOpen}
+                onClose={() => {
+                    setIsAbilityModalOpen(false)
+                    setSelectedAbility(null)
+                }}
+                className="w-[min(100%-1.5rem,36rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Habilidade</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsAbilityModalOpen(false)
+                            setSelectedAbility(null)
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    <div className="flex flex-col gap-1">
+                        <div className="text-lg text-white">
+                            {selectedAbility?.name ?? "Habilidade"}
+                        </div>
+                        <div className="text-zinc-400 text-sm">
+                            {selectedAbility?.ability_type
+                                ? formatEnum(selectedAbility.ability_type)
+                                : "Tipo não informado"}
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                        {selectedAbility?.is_active !== undefined && (
+                            <span className="border border-blue-500/40 text-blue-200 px-2 py-0.5 rounded">
+                                {selectedAbility.is_active ? "Ativa" : "Passiva"}
+                            </span>
+                        )}
+                        {selectedAbility?.element && (
+                            <span className="border border-zinc-600 text-zinc-200 px-2 py-0.5 rounded">
+                                Elemento: {formatEnum(selectedAbility.element)}
+                            </span>
+                        )}
+                        {selectedAbility?.class_name && (
+                            <span className="border border-zinc-600 text-zinc-200 px-2 py-0.5 rounded">
+                                Classe: {formatEnum(selectedAbility.class_name)}
+                            </span>
+                        )}
+                        {selectedAbility?.pe_cost != null && (
+                            <span className="border border-zinc-600 text-zinc-200 px-2 py-0.5 rounded">
+                                PE: {selectedAbility.pe_cost}
+                            </span>
+                        )}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-zinc-400 text-sm">Descrição</span>
+                        <span className="text-zinc-200">
+                            {selectedAbility?.description?.trim()
+                                ? selectedAbility.description
+                                : "Descrição não disponível."}
+                        </span>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-zinc-400 text-sm">Requisitos</span>
+                        {selectedAbilityRequirementsText ? (
+                            <pre className="text-zinc-200 text-xs whitespace-pre-wrap wrap-break-words bg-black/30 rounded p-2 border border-zinc-700">
+                                {selectedAbilityRequirementsText}
+                            </pre>
+                        ) : (
+                            <span className="text-zinc-200">Sem requisitos registrados.</span>
+                        )}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-zinc-400 text-sm">Efeito</span>
+                        {selectedAbilityEffectText ? (
+                            <pre className="text-zinc-200 text-xs whitespace-pre-wrap wrap-break-words bg-black/30 rounded p-2 border border-zinc-700">
+                                {selectedAbilityEffectText}
+                            </pre>
+                        ) : (
+                            <span className="text-zinc-200">Efeito não disponível.</span>
+                        )}
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isAbilityPickerOpen}
+                onClose={() => {
+                    setIsAbilityPickerOpen(false)
+                    setAbilitySearch("")
+                }}
+                className="w-[min(100%-1.5rem,40rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Adicionar habilidade</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsAbilityPickerOpen(false)
+                            setAbilitySearch("")
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    <input
+                        type="text"
+                        value={abilitySearch}
+                        onChange={(e) => setAbilitySearch(e.target.value)}
+                        placeholder="Buscar habilidade..."
+                        className="w-full rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                    />
+                    {isAbilityOptionsLoading && (
+                        <div className="text-zinc-300">Carregando habilidades...</div>
+                    )}
+                    {!isAbilityOptionsLoading && availableAbilities.length === 0 && (
+                        <div className="text-zinc-300">
+                            {abilitySearchTerm
+                                ? "Nenhuma habilidade encontrada."
+                                : "Nenhuma habilidade disponível para adicionar."}
+                        </div>
+                    )}
+                    {!isAbilityOptionsLoading && availableAbilities.length > 0 && (
+                        <div className="flex flex-col gap-3">
+                            {availableAbilities.map((ability) => {
+                                const requirementIssues = getAbilityRequirementIssues(ability)
+                                const canAdd = requirementIssues.length === 0
+                                return (
+                                    <div
+                                        key={ability.id}
+                                        className="flex flex-col gap-2 border border-zinc-700 rounded-lg p-3 bg-zinc-900/70"
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-white">{ability.name}</span>
+                                                <span className="text-xs text-zinc-400">
+                                                    {ability.is_active ? "Ativa" : "Passiva"} | PE {ability.pe_cost ?? 0}
+                                                </span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleAddAbility(ability)}
+                                                disabled={isAddingAbility || !canAdd}
+                                                className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black rounded text-sm font-text"
+                                            >
+                                                Adicionar
+                                            </button>
+                                        </div>
+                                        {requirementIssues.length > 0 && (
+                                            <div className="text-xs text-red-400">
+                                                Requisitos: {requirementIssues.join("; ")}
+                                            </div>
+                                        )}
+                                        {ability.description?.trim() && (
+                                            <div className="text-sm text-zinc-300">
+                                                {ability.description}
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isRemoveConfirmOpen}
+                onClose={() => {
+                    setIsRemoveConfirmOpen(false)
+                    setAbilityToRemove(null)
+                }}
+                className="w-[min(100%-1.5rem,26rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Confirmar remoção</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsRemoveConfirmOpen(false)
+                            setAbilityToRemove(null)
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Remover a habilidade{" "}
+                        <span className="text-white font-semibold">
+                            {abilityToRemove?.name ?? ""}
+                        </span>
+                        ?
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsRemoveConfirmOpen(false)
+                                setAbilityToRemove(null)
+                            }}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (abilityToRemove) {
+                                    handleRemoveAbility(abilityToRemove)
+                                }
+                                setIsRemoveConfirmOpen(false)
+                                setAbilityToRemove(null)
+                            }}
+                            disabled={!abilityToRemove || removingAbilityId === abilityToRemove?.id}
+                            className="px-4 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                        >
+                            Remover
+                        </button>
+                    </div>
+                </div>
+            </Modal>
 
             <StatusEditModal
                 isOpen={isStatusEditOpen}
@@ -985,4 +1669,3 @@ export default function CharacterSheet() {
         </MainLayout>
     )
 }
-

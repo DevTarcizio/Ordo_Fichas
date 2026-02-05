@@ -5,6 +5,25 @@
     trained_expertise?: string[]
 }
 
+export type AbilitySummary = {
+    id: number
+    name: string
+    description: string
+    ability_type: string
+    requirements?: Record<string, unknown>[] | string | null
+    effect: Record<string, unknown>
+    is_active: boolean
+    pe_cost?: number | null
+    element?: string | null
+    class_name?: string | null
+    origin_id?: number | null
+}
+
+export type ProficiencySummary = {
+    id: number
+    name: string
+}
+
 export type CharacterSummary = {
     id: number
     name: string
@@ -12,6 +31,8 @@ export type CharacterSummary = {
     character_class: string
     rank: string
     origin: string | OriginSummary | null
+    abilities?: AbilitySummary[]
+    proficiencies?: ProficiencySummary[]
 }
 
 export type CharacterDetails = CharacterSummary & {
@@ -33,6 +54,7 @@ export type CharacterDetails = CharacterSummary & {
     defense_passive: number
     defense_dodging: number
     defense_blocking: number
+    resistance_bonus?: number
     atrib_agility: number
     atrib_intellect: number
     atrib_vitallity: number
@@ -41,4 +63,5 @@ export type CharacterDetails = CharacterSummary & {
     displacement: number
     PE_per_round: number
 }
+
 

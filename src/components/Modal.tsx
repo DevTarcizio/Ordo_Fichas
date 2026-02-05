@@ -27,6 +27,8 @@ export default function Modal<T extends ElementType = "div">({
 
     const Component = (as ?? "div") as ElementType
     const shouldCloseOnBackdrop = closeOnBackdrop && Boolean(onClose)
+    const baseClassName =
+        "rounded-xl border border-cyan-500/60 bg-zinc-900/90 shadow-[0_0_0_1px_rgba(34,211,238,0.1),0_10px_40px_rgba(0,0,0,0.6)] text-white"
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -34,7 +36,10 @@ export default function Modal<T extends ElementType = "div">({
                 className={`absolute inset-0 ${backdropClassName}`}
                 onClick={shouldCloseOnBackdrop ? onClose : undefined}
             />
-            <Component className={`relative z-10 ${className ?? ""}`} {...rest}>
+            <Component
+                className={`relative z-10 ${baseClassName} ${className ?? ""}`}
+                {...rest}
+            >
                 {children}
             </Component>
         </div>

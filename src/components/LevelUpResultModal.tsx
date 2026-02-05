@@ -29,7 +29,7 @@ export default function LevelUpResultModal({
             onClose={onClose}
             closeOnBackdrop={false}
             backdropClassName="bg-black/70"
-            className="bg-zinc-900 p-6 rounded-lg w-96 border border-zinc-700"
+            className="p-6 w-96"
         >
             <h2 className="text-2xl text-green-400 mb-4 text-center">
                 Transcendeu
