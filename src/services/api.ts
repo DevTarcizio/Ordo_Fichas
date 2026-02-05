@@ -5,6 +5,11 @@ export const api = axios.create({
     withCredentials: true
 })
 
+const refreshApi = axios.create({
+    baseURL: "https://ordopraesdium-api.onrender.com/",
+    withCredentials: true
+})
+
 // Interceptor: injeta token automaticamente
 api.interceptors.request.use((config) => {
     const token = localStorage.getItem("token")
@@ -28,10 +33,53 @@ export async function login(email: string, password: string) {
     return res.data
 }
 
-// Response: erros são tratados pelo AuthContext (refresh)
+let refreshPromise: Promise<string> | null = null
+
+const isAuthEndpoint = (url?: string) => {
+    if (!url) return false
+    return url.includes("/auth/token") || url.includes("/auth/refresh_token")
+}
+
+const refreshAccessToken = async () => {
+    if (!refreshPromise) {
+        refreshPromise = refreshApi
+            .post("/auth/refresh_token")
+            .then((res) => res.data.access_token as string)
+            .finally(() => {
+                refreshPromise = null
+            })
+    }
+    return refreshPromise
+}
+
 api.interceptors.response.use(
     (response) => response,
-    (error) => Promise.reject(error)
+    async (error) => {
+        const status = error?.response?.status
+        const originalRequest = (error?.config ?? {}) as {
+            _retry?: boolean
+            url?: string
+            headers?: Record<string, string>
+        }
+
+        if (status === 401 && !originalRequest._retry && !isAuthEndpoint(originalRequest.url)) {
+            originalRequest._retry = true
+            try {
+                const newToken = await refreshAccessToken()
+                if (newToken) {
+                    localStorage.setItem("token", newToken)
+                    originalRequest.headers = originalRequest.headers ?? {}
+                    originalRequest.headers.Authorization = `Bearer ${newToken}`
+                }
+                return api(originalRequest)
+            } catch (refreshError) {
+                localStorage.removeItem("token")
+                return Promise.reject(refreshError)
+            }
+        }
+
+        return Promise.reject(error)
+    }
 )
 
 export async function register(username: string, email: string, password: string, role: string) {

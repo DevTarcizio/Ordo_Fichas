@@ -3,8 +3,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Brain, Heart, Info, MessageCircleQuestionMark, Pencil, Zap } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import { Info, Pencil } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
 import type { CharacterDetails } from "../types/character"
 import CharacterEditModal from "../components/CharacterEditModal"
@@ -14,22 +13,22 @@ import type { StatusEditForm } from "../components/StatusEditModal"
 import AttributesCard from "../components/AttributesCard"
 import AttributesEditModal from "../components/AttributesEditModal"
 import type { AttributesEditForm } from "../components/AttributesEditModal"
-import ExpertiseRollModal from "../components/ExpertiseRollModal"
+import ExpertiseRollModal, { type ExpertiseRollResult } from "../components/ExpertiseRollModal"
 import ExpertiseEditModal from "../components/ExpertiseEditModal"
 import LevelUpModal from "../components/LevelUpModal"
 import LevelUpResultModal from "../components/LevelUpResultModal"
-
-type StatusField = "healthy_points" | "sanity_points" | "effort_points" | "investigation_points"
-
-type StatusMaxField = "healthy_max" | "sanity_max" | "effort_max" | "investigation_max"
-
-type StatusConfig = {
-    label: string
-    icon: LucideIcon
-    field: StatusField
-    maxField: StatusMaxField
-    gradient: string
-}
+import {
+    attributeKeyLabelMap,
+    attributeLabelMap,
+    expertiseAttributeMap,
+    expertiseAttributeOrder,
+    expertiseLabelMap,
+    getAvatarSrc,
+    statusConfigs,
+    treinoColorClass,
+    type StatusField,
+    type StatusMaxField
+} from "../characterSheetConfig"
 
 type ExpertiseStats = {
     treino: number
@@ -40,148 +39,6 @@ type ExpertiseStats = {
 type ExpertiseMap = Record<string, ExpertiseStats>
 type ExpertiseEditForm = Record<string, { treino: string; extra: string }>
 
-type ExpertiseRollResult = {
-    expertise: string
-    attribute: string
-    attribute_value: number
-    dice_count: number
-    dice: number[]
-    treino: number
-    extra: number
-    bonus: number
-    total: number
-}
-
-const expertiseAttributeMap: Record<string, string> = {
-    acrobacias: "atrib_agility",
-    adestramento: "atrib_presence",
-    artes: "atrib_presence",
-    atletismo: "atrib_strength",
-    atualidades: "atrib_intellect",
-    ciencia: "atrib_intellect",
-    crime: "atrib_agility",
-    diplomacia: "atrib_presence",
-    enganacao: "atrib_presence",
-    fortitude: "atrib_vitallity",
-    furtividade: "atrib_agility",
-    iniciativa: "atrib_agility",
-    intimidacao: "atrib_presence",
-    intuicao: "atrib_presence",
-    investigacao: "atrib_intellect",
-    luta: "atrib_strength",
-    medicina: "atrib_intellect",
-    ocultismo: "atrib_intellect",
-    pilotagem: "atrib_agility",
-    pontaria: "atrib_agility",
-    profissao: "atrib_intellect",
-    reflexos: "atrib_agility",
-    religiao: "atrib_presence",
-    sobrevivencia: "atrib_intellect",
-    tatica: "atrib_intellect",
-    tecnologia: "atrib_intellect",
-    vontade: "atrib_presence",
-    sociedade: "atrib_intellect",
-    escutar: "atrib_presence",
-    observar: "atrib_presence"
-}
-
-const expertiseAttributeOrder = [
-    "atrib_agility",
-    "atrib_strength",
-    "atrib_vitallity",
-    "atrib_intellect",
-    "atrib_presence"
-]
-
-const attributeLabelMap: Record<string, string> = {
-    atrib_agility: "Agilidade",
-    atrib_strength: "Força",
-    atrib_vitallity: "Vigor",
-    atrib_intellect: "Intelecto",
-    atrib_presence: "Presença"
-}
-
-const attributeKeyLabelMap: Record<string, string> = {
-    agility: "Agilidade",
-    intellect: "Intelecto",
-    vitallity: "Vigor",
-    presence: "Presença",
-    strength: "Força"
-}
-
-const expertiseLabelMap: Record<string, string> = {
-    acrobacias: "Acrobacias",
-    adestramento: "Adestramento",
-    artes: "Artes",
-    atletismo: "Atletismo",
-    atualidades: "Atualidades",
-    ciencia: "Ci\u00eancia",
-    crime: "Crime",
-    diplomacia: "Diplomacia",
-    enganacao: "Engana\u00e7\u00e3o",
-    fortitude: "Fortitude",
-    furtividade: "Furtividade",
-    iniciativa: "Iniciativa",
-    intimidacao: "Intimida\u00e7\u00e3o",
-    intuicao: "Intui\u00e7\u00e3o",
-    investigacao: "Investiga\u00e7\u00e3o",
-    luta: "Luta",
-    medicina: "Medicina",
-    ocultismo: "Ocultismo",
-    pilotagem: "Pilotagem",
-    pontaria: "Pontaria",
-    profissao: "Profiss\u00e3o",
-    reflexos: "Reflexos",
-    religiao: "Religi\u00e3o",
-    sobrevivencia: "Sobreviv\u00eancia",
-    tatica: "T\u00e1tica",
-    tecnologia: "Tecnologia",
-    vontade: "Vontade",
-    sociedade: "Sociedade",
-    escutar: "Escutar",
-    observar: "Observar"
-}
-
-const treinoColorClass = (treino?: number, extra?: number) => {
-    if ((treino ?? 0) === 0 && (extra ?? 0) > 0) return "text-sky-300"
-    if (treino === 0) return "text-zinc-500"
-    if (treino === 5) return "text-green-400"
-    if (treino === 10) return "text-blue-700"
-    if (treino === 15) return "text-orange-400"
-    return "text-white"
-}
-
-const statusConfigs: StatusConfig[] = [
-    {
-        label: "VIDA",
-        icon: Heart,
-        field: "healthy_points",
-        maxField: "healthy_max",
-        gradient: "bg-gradient-to-r from-red-700 to-red-500"
-    },
-    {
-        label: "SANIDADE",
-        icon: Brain,
-        field: "sanity_points",
-        maxField: "sanity_max",
-        gradient: "bg-gradient-to-r from-blue-700 to-blue-500"
-    },
-    {
-        label: "ESFORÇO",
-        icon: Zap,
-        field: "effort_points",
-        maxField: "effort_max",
-        gradient: "bg-gradient-to-r from-yellow-700 to-yellow-500"
-    },
-    {
-        label: "INVESTIGAÇÃO",
-        icon: MessageCircleQuestionMark,
-        field: "investigation_points",
-        maxField: "investigation_max",
-        gradient: "bg-gradient-to-r from-green-700 to-green-500"
-    }
-]
-
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value))
 }
@@ -191,27 +48,13 @@ function toNumber(value: string, fallback: number) {
     return Number.isNaN(parsed) ? fallback : parsed
 }
 
-function getAvatarSrc(character: CharacterDetails) {
-    const lifePercent = character.healthy_points / character.healthy_max
-    const sanityPercent = character.sanity_points / character.sanity_max
-
-    if (lifePercent <= 0.0 && sanityPercent <= 0.0) {
-        return `/avatars/${character.avatar}/${character.avatar}_dying_and_madness.png`
+const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
+    if (!origin) return ""
+    if (typeof origin === "string") return origin
+    if (typeof origin === "object" && typeof origin.name === "string") {
+        return origin.name
     }
-
-    if (sanityPercent <= 0.0) {
-        return `/avatars/${character.avatar}/${character.avatar}_madness.png`
-    }
-
-    if (lifePercent <= 0.0) {
-        return `/avatars/${character.avatar}/${character.avatar}_dying.png`
-    }
-
-    if (lifePercent <= 0.5) {
-        return `/avatars/${character.avatar}/${character.avatar}_hurt.png`
-    }
-
-    return `/avatars/${character.avatar}/${character.avatar}.png`
+    return ""
 }
 
 export default function CharacterSheet() {
@@ -251,7 +94,7 @@ export default function CharacterSheet() {
 
                 const formattedCharacter = {
                     ...response.data,
-                    origin: formatEnum(response.data.origin),
+                    origin: formatEnum(getOriginName(response.data.origin)),
                     character_class: formatEnum(response.data.character_class),
                     rank: formatEnum(response.data.rank),
                     subclass: formatEnum(response.data.subclass),
@@ -348,7 +191,10 @@ export default function CharacterSheet() {
             healthy_max: String(character.healthy_max),
             sanity_max: String(character.sanity_max),
             effort_max: String(character.effort_max),
-            investigation_max: String(character.investigation_max)
+            investigation_max: String(character.investigation_max),
+            defense_passive: String(character.defense_passive),
+            defense_dodging: String(character.defense_dodging),
+            defense_blocking: String(character.defense_blocking)
         })
         setIsStatusEditOpen(true)
     }
@@ -429,7 +275,10 @@ export default function CharacterSheet() {
             healthy_max: toNumber(statusForm.healthy_max, character.healthy_max),
             sanity_max: toNumber(statusForm.sanity_max, character.sanity_max),
             effort_max: toNumber(statusForm.effort_max, character.effort_max),
-            investigation_max: toNumber(statusForm.investigation_max, character.investigation_max)
+            investigation_max: toNumber(statusForm.investigation_max, character.investigation_max),
+            defense_passive: toNumber(statusForm.defense_passive, character.defense_passive),
+            defense_dodging: toNumber(statusForm.defense_dodging, character.defense_dodging),
+            defense_blocking: toNumber(statusForm.defense_blocking, character.defense_blocking)
         }
 
         try {
@@ -453,7 +302,7 @@ export default function CharacterSheet() {
                 }
                 return {
                     ...merged,
-                    origin: formatEnum(merged.origin),
+                    origin: formatEnum(getOriginName(merged.origin)),
                     character_class: formatEnum(merged.character_class),
                     subclass: formatEnum(merged.subclass),
                     trail: formatEnum(merged.trail),
@@ -507,7 +356,7 @@ export default function CharacterSheet() {
                 const merged = {
                     ...prev,
                     ...updatedCharacter,
-                    origin: formatEnum(updatedCharacter.origin ?? prev.origin),
+                    origin: formatEnum(getOriginName(updatedCharacter.origin ?? prev.origin)),
                     character_class: formatEnum(updatedCharacter.character_class ?? prev.character_class),
                     subclass: formatEnum(updatedCharacter.subclass ?? prev.subclass),
                     trail: formatEnum(updatedCharacter.trail ?? prev.trail),
@@ -557,7 +406,7 @@ export default function CharacterSheet() {
                 const merged = {
                     ...prev,
                     ...updatedCharacter,
-                    origin: formatEnum(updatedCharacter.origin ?? prev.origin),
+                    origin: formatEnum(getOriginName(updatedCharacter.origin ?? prev.origin)),
                     character_class: formatEnum(updatedCharacter.character_class ?? prev.character_class),
                     subclass: formatEnum(updatedCharacter.subclass ?? prev.subclass),
                     trail: formatEnum(updatedCharacter.trail ?? prev.trail),
@@ -666,7 +515,7 @@ export default function CharacterSheet() {
             const newCharacter = {
                 ...oldCharacter,
                 ...updated,
-                origin: formatEnum(updated.origin ?? oldCharacter.origin),
+                origin: formatEnum(getOriginName(updated.origin ?? oldCharacter.origin)),
                 character_class: formatEnum(updated.character_class ?? oldCharacter.character_class),
                 subclass: formatEnum(updated.subclass ?? oldCharacter.subclass),
                 trail: formatEnum(updated.trail ?? oldCharacter.trail),
@@ -727,7 +576,7 @@ export default function CharacterSheet() {
                 const merged = {
                     ...prev,
                     ...updatedCharacter,
-                    origin: formatEnum(updatedCharacter.origin ?? prev.origin),
+                    origin: formatEnum(getOriginName(updatedCharacter.origin ?? prev.origin)),
                     character_class: formatEnum(updatedCharacter.character_class ?? prev.character_class),
                     subclass: formatEnum(updatedCharacter.subclass ?? prev.subclass),
                     trail: formatEnum(updatedCharacter.trail ?? prev.trail),
@@ -894,6 +743,32 @@ export default function CharacterSheet() {
                                     />
                                 ))}
                             </div>
+
+                            <div className="border-t border-zinc-700 pt-4">
+                                <div className="text-blue-300 font-smalltitle text-lg text-center">
+                                    Defesas
+                                </div>
+                                <div className="mt-3 grid grid-cols-3 gap-3">
+                                    <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
+                                        <div className="text-xs text-zinc-400 font-text">Passiva</div>
+                                        <div className="text-white text-lg font-text">
+                                            {character.defense_passive}
+                                        </div>
+                                    </div>
+                                    <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
+                                        <div className="text-xs text-zinc-400 font-text">Esquiva</div>
+                                        <div className="text-white text-lg font-text">
+                                            {character.defense_dodging}
+                                        </div>
+                                    </div>
+                                    <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
+                                        <div className="text-xs text-zinc-400 font-text">Bloqueio</div>
+                                        <div className="text-white text-lg font-text">
+                                            {character.defense_blocking}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -960,6 +835,17 @@ export default function CharacterSheet() {
                                 {expertiseAttributeOrder.map((attr, index) => {
                                     const items = Object.keys(expertiseAttributeMap)
                                         .filter((name) => expertiseAttributeMap[name] === attr)
+                                        .sort((a, b) => {
+                                            const aStats = expertise?.[a]
+                                            const bStats = expertise?.[b]
+                                            const treinoDiff = (bStats?.treino ?? 0) - (aStats?.treino ?? 0)
+                                            if (treinoDiff !== 0) return treinoDiff
+                                            const extraDiff = (bStats?.extra ?? 0) - (aStats?.extra ?? 0)
+                                            if (extraDiff !== 0) return extraDiff
+                                            const aLabel = expertiseLabelMap[a] ?? formatEnum(a)
+                                            const bLabel = expertiseLabelMap[b] ?? formatEnum(b)
+                                            return aLabel.localeCompare(bLabel, "pt-BR")
+                                        })
                                     return (
                                         <div
                                             key={attr}
@@ -1080,9 +966,6 @@ export default function CharacterSheet() {
                 isOpen={isExpertiseEditOpen}
                 form={expertiseForm}
                 isSaving={isSavingExpertise}
-                expertiseAttributeOrder={expertiseAttributeOrder}
-                expertiseAttributeMap={expertiseAttributeMap}
-                attributeLabelMap={attributeLabelMap}
                 onClose={() => setIsExpertiseEditOpen(false)}
                 onChange={handleExpertiseEditChange}
                 onSubmit={handleExpertiseEditSubmit}
@@ -1102,3 +985,4 @@ export default function CharacterSheet() {
         </MainLayout>
     )
 }
+

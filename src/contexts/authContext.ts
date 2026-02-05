@@ -9,6 +9,7 @@ type AuthContextType = {
     user: User | null
     token: string | null
     isAuthenticated: boolean
+    isLoading: boolean
     login: (token: string) => void
     logout: () => void
 }

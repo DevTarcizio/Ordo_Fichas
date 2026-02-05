@@ -1,4 +1,5 @@
-import type { CharacterDetails } from "../types/character"
+﻿import type { CharacterDetails } from "../types/character"
+import Modal from "./Modal"
 
 type LevelUpResultModalProps = {
     diff: {
@@ -9,7 +10,7 @@ type LevelUpResultModalProps = {
 }
 
 export default function LevelUpResultModal({
-    diff, 
+    diff,
     onClose
 }: LevelUpResultModalProps) {
     if (!diff) return null
@@ -23,42 +24,48 @@ export default function LevelUpResultModal({
     ] as const
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-            <div className="bg-zinc-900 p-6 rounded-lg w-96 border border-zinc-700">
-                <h2 className="text-2xl text-green-400 mb-4 text-center">
-                    Transcendeu
-                </h2>
+        <Modal
+            isOpen
+            onClose={onClose}
+            closeOnBackdrop={false}
+            backdropClassName="bg-black/70"
+            className="bg-zinc-900 p-6 rounded-lg w-96 border border-zinc-700"
+        >
+            <h2 className="text-2xl text-green-400 mb-4 text-center">
+                Transcendeu
+            </h2>
 
-                <div className="flex flex-col gap-2">
-                    {rows.map(row => {
-                        const oldVal = diff.old[row.key]
-                        const newVal = diff.new[row.key]
-                        if (oldVal == newVal) return null
+            <div className="flex flex-col gap-2">
+                {rows.map(row => {
+                    const oldVal = diff.old[row.key]
+                    const newVal = diff.new[row.key]
+                    if (oldVal == newVal) return null
 
-                        return (
-                            <div 
-                                key={row.key}
-                                className="flex justify-between text-white"
-                            >
-                                <span>{row.label}</span>
-                                <span>
-                                    {oldVal} {" -> "}
-                                    <span className="text-green-400 font-text">
-                                        {newVal}
-                                    </span>
+                    return (
+                        <div 
+                            key={row.key}
+                            className="flex justify-between text-white"
+                        >
+                            <span>{row.label}</span>
+                            <span>
+                                {oldVal} {" -> "}
+                                <span className="text-green-400 font-text">
+                                    {newVal}
                                 </span>
-                            </div>
-                        )
-                    })}
-                </div>
-
-                <button
-                    onClick={onClose}
-                    className="mt-6 w-full bg-green-500 hover:bg-green-600 text-black py-2 rounded"
-                >   
-                    Confirmar
-                </button>
+                            </span>
+                        </div>
+                    )
+                })}
             </div>
-        </div>
+
+            <button
+                onClick={onClose}
+                className="mt-6 w-full bg-green-500 hover:bg-green-600 text-black py-2 rounded"
+            >
+                Confirmar
+            </button>
+        </Modal>
     )
 }
+
+

@@ -1,10 +1,17 @@
-﻿export type CharacterSummary = {
+﻿export type OriginSummary = {
+    id?: number
+    name: string
+    description?: string
+    trained_expertise?: string[]
+}
+
+export type CharacterSummary = {
     id: number
     name: string
     age: number
     character_class: string
     rank: string
-    origin: string
+    origin: string | OriginSummary | null
 }
 
 export type CharacterDetails = CharacterSummary & {
@@ -23,6 +30,9 @@ export type CharacterDetails = CharacterSummary & {
     effort_max: number
     investigation_points: number
     investigation_max: number
+    defense_passive: number
+    defense_dodging: number
+    defense_blocking: number
     atrib_agility: number
     atrib_intellect: number
     atrib_vitallity: number
@@ -31,3 +41,4 @@ export type CharacterDetails = CharacterSummary & {
     displacement: number
     PE_per_round: number
 }
+

@@ -5,6 +5,9 @@ export type StatusEditForm = {
     sanity_max: string
     effort_max: string
     investigation_max: string
+    defense_passive: string
+    defense_dodging: string
+    defense_blocking: string
 }
 
 type Props = {
@@ -71,6 +74,30 @@ export default function StatusEditModal({
                         name="investigation_max"
                         type="number"
                         value={form.investigation_max}
+                        onChange={onChange}
+                    />
+
+                    <FloatingInput
+                        label="Defesa Passiva"
+                        name="defense_passive"
+                        type="number"
+                        value={form.defense_passive}
+                        onChange={onChange}
+                    />
+
+                    <FloatingInput
+                        label="Defesa Esquiva"
+                        name="defense_dodging"
+                        type="number"
+                        value={form.defense_dodging}
+                        onChange={onChange}
+                    />
+
+                    <FloatingInput
+                        label="Defesa Bloqueio"
+                        name="defense_blocking"
+                        type="number"
+                        value={form.defense_blocking}
                         onChange={onChange}
                     />
                 </div>

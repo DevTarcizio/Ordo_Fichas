@@ -7,16 +7,25 @@ import MainLayout from "../components/MainLayout"
 import { formatEnum } from "../utils"
 import type { CharacterSummary } from "../types/character"
 
+const getOriginName = (origin: CharacterSummary["origin"]) => {
+    if (!origin) return ""
+    if (typeof origin === "string") return origin
+    if (typeof origin === "object" && typeof origin.name === "string") {
+        return origin.name
+    }
+    return ""
+}
+
 export default function Dashboard() {
-    const { user, logout } = useAuth()
+    const { user, logout, isLoading } = useAuth()
     const navigate = useNavigate()
     const [characters, setCharacters] = useState<CharacterSummary[]>([])
 
     useEffect(() => {
-        if (!user) {
+        if (!user && !isLoading) {
             navigate("/")
         }
-    }, [navigate, user])
+    }, [navigate, user, isLoading])
 
     useEffect(() => {
         async function getCharacters() {
@@ -26,7 +35,7 @@ export default function Dashboard() {
                 const response = await api.get("/characters/list")
                 const formattedCharacters = response.data.characters.map((char: CharacterSummary) => ({
                     ...char,
-                    origin: formatEnum(char.origin),
+                    origin: formatEnum(getOriginName(char.origin)),
                     character_class: formatEnum(char.character_class),
                     rank: formatEnum(char.rank)
                 }))
@@ -39,6 +48,10 @@ export default function Dashboard() {
 
         getCharacters()
     }, [user])
+
+    if (isLoading) {
+        return null
+    }
 
     if (!user) {
         return null
