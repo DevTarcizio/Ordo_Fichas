@@ -24,6 +24,18 @@ export type ProficiencySummary = {
     name: string
 }
 
+export type WeaponSummary = {
+    id: number
+    name: string
+    description: string
+    category: string
+    damage_formula: string
+    threat_margin: number
+    critical_multiplier: number
+    weapon_range: string
+    space: number
+}
+
 export type CharacterSummary = {
     id: number
     name: string
@@ -33,6 +45,7 @@ export type CharacterSummary = {
     origin: string | OriginSummary | null
     abilities?: AbilitySummary[]
     proficiencies?: ProficiencySummary[]
+    weapons?: WeaponSummary[]
 }
 
 export type CharacterDetails = CharacterSummary & {

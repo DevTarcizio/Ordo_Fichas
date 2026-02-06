@@ -1,4 +1,7 @@
-interface FloatingInputsProps {
+interface FloatingInputsProps extends Omit<
+    React.InputHTMLAttributes<HTMLInputElement>,
+    "value" | "name" | "onChange" | "type"
+> {
     label: string
     name: string
     value: string | number
@@ -6,7 +9,14 @@ interface FloatingInputsProps {
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
 }
 
-export default function FloatingInput({ label, name, value, type = "text", onChange }: FloatingInputsProps) {
+export default function FloatingInput({
+    label,
+    name,
+    value,
+    type = "text",
+    onChange,
+    ...inputProps
+}: FloatingInputsProps) {
     return (
         <div className="relative w-full">
             <input 
@@ -16,6 +26,7 @@ export default function FloatingInput({ label, name, value, type = "text", onCha
                 value={value}
                 onChange={onChange}
                 placeholder=""
+                {...inputProps}
                 className="peer w-full px-4 pt-5 pb-3 border border-zinc-700 rounded-lg bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-600 font-text"
             />
             <label 
