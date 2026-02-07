@@ -42,6 +42,26 @@ type ExpertiseStats = {
 type ExpertiseMap = Record<string, ExpertiseStats>
 type ExpertiseEditForm = Record<string, { treino: string; extra: string }>
 
+type SpecialAttackTarget = "attack" | "damage"
+
+type SpecialAttackOption = {
+    nexMin: number
+    peCost: number
+    bonus: number
+}
+
+type PendingSpecialAttack = {
+    bonus: number
+    peCost: number
+    target: SpecialAttackTarget
+    label: string
+}
+
+type SpecialAttackEffect = {
+    options: SpecialAttackOption[]
+    appliesTo: SpecialAttackTarget[]
+}
+
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value))
 }
@@ -49,6 +69,62 @@ function clamp(value: number, min: number, max: number) {
 function toNumber(value: string, fallback: number) {
     const parsed = Number(value)
     return Number.isNaN(parsed) ? fallback : parsed
+}
+
+function toFiniteNumber(value: unknown) {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value)
+        if (Number.isFinite(parsed)) return parsed
+    }
+    return null
+}
+
+const parseSpecialAttackEffect = (
+    effect: Record<string, unknown> | null | undefined
+): SpecialAttackEffect | null => {
+    if (!effect || typeof effect !== "object") return null
+    const rawType = (effect as Record<string, unknown>).type
+    if (rawType !== "attack_or_damage_bonus") return null
+
+    const rawOptions = Array.isArray((effect as Record<string, unknown>).options)
+        ? (effect as Record<string, unknown>).options
+        : []
+    const options = rawOptions
+        .map((item) => {
+            const option = item as Record<string, unknown>
+            const nexMin = toFiniteNumber(option.nex_min)
+            const peCost = toFiniteNumber(option.pe_cost)
+            const bonus = toFiniteNumber(option.bonus)
+            if (nexMin === null || peCost === null || bonus === null) return null
+            const adjustedNexMin =
+                nexMin === 0 && bonus === 5 && peCost === 2
+                    ? 5
+                    : nexMin
+            return { nexMin: adjustedNexMin, peCost, bonus }
+        })
+        .filter((option): option is SpecialAttackOption => option !== null)
+        .sort((a, b) => a.nexMin - b.nexMin || a.peCost - b.peCost || a.bonus - b.bonus)
+
+    const rawAppliesTo = Array.isArray((effect as Record<string, unknown>).applies_to)
+        ? (effect as Record<string, unknown>).applies_to
+        : []
+    const appliesTo = rawAppliesTo.filter(
+        (item): item is SpecialAttackTarget => item === "attack" || item === "damage"
+    )
+
+    return {
+        options,
+        appliesTo: appliesTo.length > 0 ? appliesTo : ["attack", "damage"]
+    }
+}
+
+const formatSpecialAttackTarget = (target: SpecialAttackTarget) =>
+    target === "attack" ? "teste de ataque" : "rolagem de dano"
+
+const formatSignedBonus = (value: number) => {
+    if (!value) return ""
+    return value > 0 ? `+${value}` : String(value)
 }
 
 const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
@@ -199,6 +275,9 @@ export default function CharacterSheet() {
         formula: string
         dice: number[]
         total: number
+        bonus?: number
+        bonusLabel?: string
+        bonusParts?: { label: string; value: number }[]
     } | null>(null)
     const [isExpertiseEditOpen, setIsExpertiseEditOpen] = useState(false)
     const [expertiseForm, setExpertiseForm] = useState<ExpertiseEditForm | null>(null)
@@ -214,6 +293,11 @@ export default function CharacterSheet() {
     const [isAbilityPickerOpen, setIsAbilityPickerOpen] = useState(false)
     const [isAbilityOptionsLoading, setIsAbilityOptionsLoading] = useState(false)
     const [isAddingAbility, setIsAddingAbility] = useState(false)
+    const [abilityTab, setAbilityTab] = useState<"active" | "passive">("active")
+    const [isSpecialAttackModalOpen, setIsSpecialAttackModalOpen] = useState(false)
+    const [specialAttackTarget, setSpecialAttackTarget] = useState<SpecialAttackTarget>("attack")
+    const [specialAttackOption, setSpecialAttackOption] = useState<SpecialAttackOption | null>(null)
+    const [pendingSpecialAttack, setPendingSpecialAttack] = useState<PendingSpecialAttack | null>(null)
     const [weaponOptions, setWeaponOptions] = useState<WeaponSummary[]>([])
     const [weaponSearch, setWeaponSearch] = useState("")
     const [isWeaponPickerOpen, setIsWeaponPickerOpen] = useState(false)
@@ -658,7 +742,10 @@ export default function CharacterSheet() {
         }
     }
 
-    const handleRollExpertise = async (expertiseName: string) => {
+    const handleRollExpertise = async (
+        expertiseName: string,
+        extraBonus?: { value: number; label?: string }
+    ) => {
         setIsRollOpen(true)
         setIsRolling(true)
         setRollResult(null)
@@ -667,7 +754,20 @@ export default function CharacterSheet() {
             const response = await api.get(
                 `/characters/${character!.id}/expertise/${expertiseName}/roll`
             )
-            setRollResult(response.data)
+            const baseResult = response.data as ExpertiseRollResult
+            if (extraBonus && Number.isFinite(extraBonus.value) && extraBonus.value !== 0) {
+                const nextBonus = (baseResult.bonus ?? 0) + extraBonus.value
+                const nextTotal = (baseResult.total ?? 0) + extraBonus.value
+                setRollResult({
+                    ...baseResult,
+                    bonus: nextBonus,
+                    total: nextTotal,
+                    extra_bonus: extraBonus.value,
+                    extra_label: extraBonus.label
+                })
+            } else {
+                setRollResult(baseResult)
+            }
         } catch (err) {
             console.error(err)
             alert("Erro ao rolar perícia")
@@ -696,10 +796,21 @@ export default function CharacterSheet() {
         setIsRolling(false)
     }
 
+    const consumeSpecialAttack = (target: SpecialAttackTarget) => {
+        const pending = pendingSpecialAttack
+        if (!pending || pending.target !== target) return null
+        setPendingSpecialAttack(null)
+        return pending
+    }
+
     const handleWeaponTestRoll = (weapon: WeaponSummary) => {
         const expertiseName =
             weapon.weapon_range === "corpo_a_corpo" ? "luta" : "pontaria"
-        handleRollExpertise(expertiseName)
+        const pending = consumeSpecialAttack("attack")
+        handleRollExpertise(
+            expertiseName,
+            pending ? { value: pending.bonus, label: pending.label } : undefined
+        )
     }
 
     const handleWeaponDamageRoll = (weapon: WeaponSummary, isCritical: boolean) => {
@@ -708,22 +819,44 @@ export default function CharacterSheet() {
             alert("Formato de dano invalido. Use XdY, por exemplo: 3d6.")
             return
         }
+        const pending = consumeSpecialAttack("damage")
         const multiplier = isCritical
             ? Math.max(1, Number(weapon.critical_multiplier) || 1)
             : 1
         const diceCount = parsed.diceCount * multiplier
         const dice = rollDice(diceCount, parsed.diceSides)
-        const total = dice.reduce((sum, value) => sum + value, 0)
+        const baseTotal = dice.reduce((sum, value) => sum + value, 0)
+        const bonusParts: { label: string; value: number }[] = []
+        if (pending?.bonus) {
+            bonusParts.push({
+                label: pending.label ?? "Ataque Especial",
+                value: pending.bonus
+            })
+        }
+        if (hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo") {
+            const agilityBonus = Number(character?.atrib_agility ?? 0)
+            if (agilityBonus) {
+                bonusParts.push({
+                    label: "Tiro Certeiro (Agilidade)",
+                    value: agilityBonus
+                })
+            }
+        }
+        const bonus = bonusParts.reduce((sum, part) => sum + part.value, 0)
+        const total = baseTotal + bonus
         setWeaponRollResult({
             title: `${isCritical ? "Crítico" : "Dano"} - ${weapon.name}`,
-            formula: `${diceCount}d${parsed.diceSides}`,
+            formula: `${diceCount}d${parsed.diceSides}${bonus ? `+${bonus}` : ""}`,
             dice,
-            total
+            total,
+            bonus: bonus || undefined,
+            bonusLabel: bonusParts.length === 1 ? bonusParts[0].label : undefined,
+            bonusParts: bonusParts.length > 0 ? bonusParts : undefined
         })
         setIsWeaponRollOpen(true)
     }
 
-    const getWeaponTestFormula = (weapon: WeaponSummary) => {
+    const getWeaponTestFormula = (weapon: WeaponSummary, extraBonus = 0) => {
         const expertiseName =
             weapon.weapon_range === "corpo_a_corpo" ? "luta" : "pontaria"
         const attributeField = expertiseAttributeMap[expertiseName]
@@ -732,7 +865,7 @@ export default function CharacterSheet() {
                 ? Number(character[attributeField as keyof CharacterDetails]) || 0
                 : 0
         const stats = expertise?.[expertiseName]
-        const bonus = (stats?.treino ?? 0) + (stats?.extra ?? 0)
+        const bonus = (stats?.treino ?? 0) + (stats?.extra ?? 0) + extraBonus
         if (diceCount <= 0 && bonus <= 0) return "0d20"
         return `${diceCount}d20${bonus > 0 ? `+${bonus}` : ""}`
     }
@@ -986,6 +1119,13 @@ export default function CharacterSheet() {
                 return merged
             })
             maybeUpdateOriginInfo(updated)
+            const effectType =
+                ability.effect && typeof ability.effect === "object"
+                    ? (ability.effect as Record<string, unknown>).type
+                    : null
+            if (effectType === "attack_or_damage_bonus" || normalizeText(ability.name) === "ataque especial") {
+                setPendingSpecialAttack(null)
+            }
         } catch (err) {
             console.error(err)
             alert("Erro ao remover habilidade")
@@ -1159,6 +1299,7 @@ export default function CharacterSheet() {
     const assignedAbilityIds = new Set(abilities.map((ability) => ability.id))
     const assignedWeaponIds = new Set(weapons.map((weapon) => weapon.id))
     const abilitySearchTerm = abilitySearch.trim().toLowerCase()
+    const characterClassKey = reverseFormatEnum(character.character_class)
     const weaponSearchTerm = normalizeText(weaponSearch.trim())
     const availableWeapons = weaponOptions
         .filter((weapon) => !assignedWeaponIds.has(weapon.id))
@@ -1255,10 +1396,46 @@ export default function CharacterSheet() {
         .filter((ability) => ability.origin_id == null)
         .filter((ability) => !assignedAbilityIds.has(ability.id))
         .filter((ability) => {
+            if (!ability.class_name) return false
+            return normalizeText(ability.class_name) === normalizeText(characterClassKey)
+        })
+        .filter((ability) => {
             if (!abilitySearchTerm) return true
             return ability.name.toLowerCase().includes(abilitySearchTerm)
         })
+    const specialAttackAbility = abilities.find((ability) => {
+        const effectType =
+            ability.effect && typeof ability.effect === "object"
+                ? (ability.effect as Record<string, unknown>).type
+                : null
+        return effectType === "attack_or_damage_bonus" || normalizeText(ability.name) === "ataque especial"
+    })
+    const specialAttackEffect = parseSpecialAttackEffect(
+        (specialAttackAbility?.effect as Record<string, unknown> | null) ?? null
+    )
+    const specialAttackOptions = specialAttackEffect?.options ?? []
+    const availableSpecialAttackOptions = specialAttackOptions.filter(
+        (option) => character.nex_total >= option.nexMin
+    )
+    const specialAttackTargets = specialAttackEffect?.appliesTo ?? ["attack", "damage"]
+    const tiroCerteiroAbility = abilities.find((ability) => {
+        const effectType =
+            ability.effect && typeof ability.effect === "object"
+                ? (ability.effect as Record<string, unknown>).type
+                : null
+        return effectType === "firearm_damage_agility" || normalizeText(ability.name) === "tiro certeiro"
+    })
+    const hasTiroCerteiro = Boolean(tiroCerteiroAbility)
+    const tiroCerteiroBonusValue = hasTiroCerteiro ? Number(character.atrib_agility) || 0 : 0
+    const passiveBonusNotes = [
+        tiroCerteiroBonusValue
+            ? { label: "Tiro Certeiro", detail: `+${tiroCerteiroBonusValue} no dano (armas de disparo)` }
+            : null
+    ].filter((item): item is { label: string; detail: string } => item !== null)
+    const activeAbilities = abilities.filter((ability) => Boolean(ability.is_active))
+    const passiveAbilities = abilities.filter((ability) => !ability.is_active)
     const selectedAbilityRequirements = selectedAbility?.requirements ?? []
+    const currentEffort = character.effort_points
     const selectedAbilityRequirementsText =
         selectedAbilityRequirements.length > 0
             ? toAbilityJson(selectedAbilityRequirements)
@@ -1267,6 +1444,150 @@ export default function CharacterSheet() {
         selectedAbility && selectedAbility.effect && Object.keys(selectedAbility.effect).length > 0
             ? toAbilityJson(selectedAbility.effect)
             : ""
+
+    const openSpecialAttackModal = () => {
+        const affordableOptions = availableSpecialAttackOptions.filter(
+            (option) => currentEffort >= option.peCost
+        )
+        const defaultOption =
+            affordableOptions[affordableOptions.length - 1]
+            ?? availableSpecialAttackOptions[availableSpecialAttackOptions.length - 1]
+            ?? null
+        setSpecialAttackOption(defaultOption)
+        const defaultTarget = specialAttackTargets.includes("attack")
+            ? "attack"
+            : (specialAttackTargets[0] ?? "attack")
+        setSpecialAttackTarget(defaultTarget)
+        setIsSpecialAttackModalOpen(true)
+    }
+
+    const handleApplySpecialAttack = () => {
+        if (!specialAttackOption) return
+        if (currentEffort < specialAttackOption.peCost) {
+            alert("PE insuficiente para usar Ataque Especial.")
+            return
+        }
+        if (specialAttackOption.peCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -specialAttackOption.peCost)
+        }
+        setPendingSpecialAttack({
+            bonus: specialAttackOption.bonus,
+            peCost: specialAttackOption.peCost,
+            target: specialAttackTarget,
+            label: `Ataque Especial (PE ${specialAttackOption.peCost})`
+        })
+        setIsSpecialAttackModalOpen(false)
+    }
+
+    const handleCancelPendingSpecialAttack = () => {
+        if (!pendingSpecialAttack) return
+        if (pendingSpecialAttack.peCost > 0) {
+            handleStatusChange("effort_points", "effort_max", pendingSpecialAttack.peCost)
+        }
+        setPendingSpecialAttack(null)
+    }
+
+    const canAffordSpecialAttack =
+        Boolean(specialAttackOption) && currentEffort >= (specialAttackOption?.peCost ?? 0)
+
+    const renderAbilityItem = (ability: AbilitySummary) => {
+        const isOriginAbility =
+            originInfo?.id != null && ability.origin_id === originInfo.id
+        const isSpecialAttack = specialAttackAbility?.id === ability.id
+        const metaParts = [
+            ability.is_active ? "Ativa" : "Passiva",
+            `PE ${ability.pe_cost ?? 0}`
+        ]
+
+        return (
+            <div
+                key={ability.id}
+                onClick={isSpecialAttack ? openSpecialAttackModal : undefined}
+                onKeyDown={(event) => {
+                    if (!isSpecialAttack) return
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        openSpecialAttackModal()
+                    }
+                }}
+                role={isSpecialAttack ? "button" : undefined}
+                tabIndex={isSpecialAttack ? 0 : undefined}
+                className={`flex items-center justify-between gap-3 bg-zinc-900/70 border border-zinc-700 rounded-lg p-3 ${
+                    isSpecialAttack
+                        ? "cursor-pointer hover:border-emerald-500/60 focus:outline-none focus:border-emerald-400/80"
+                        : ""
+                }`}
+            >
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                        <span className="text-white font-text">
+                            {ability.name}
+                        </span>
+                        {ability.class_name === "especialista" && (
+                            <span className="text-emerald-300 border border-emerald-500/40 text-xs px-2 py-0.5 rounded">
+                                Poder de Especialista
+                            </span>
+                        )}
+                        {ability.class_name === "ocultista" && (
+                            <span className="text-purple-300 border border-purple-500/40 text-xs px-2 py-0.5 rounded">
+                                Poder de Ocultista
+                            </span>
+                        )}
+                        {ability.class_name === "combatente" && (
+                            <span className="text-red-400 border border-red-500/40 text-xs px-2 py-0.5 rounded">
+                                Poder de Combatente
+                            </span>
+                        )}
+                        {isOriginAbility && (
+                            <span className="text-emerald-300 border border-emerald-500/40 text-xs px-2 py-0.5 rounded">
+                                Origem
+                            </span>
+                        )}
+                    </div>
+                    {metaParts.length > 0 && (
+                        <span className="text-zinc-400 text-xs font-text">
+                            {metaParts.join(" | ")}
+                        </span>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            setSelectedAbility(ability)
+                            setIsAbilityModalOpen(true)
+                        }}
+                        className="text-blue-400 hover:text-blue-300 transition-colors"
+                        title="Detalhes da habilidade"
+                        aria-label="Detalhes da habilidade"
+                    >
+                        <Info size={18} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            setAbilityToRemove(ability)
+                            setIsRemoveConfirmOpen(true)
+                        }}
+                        disabled={
+                            removingAbilityId === ability.id || isOriginAbility
+                        }
+                        className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        title={
+                            isOriginAbility
+                                ? "Habilidade de origem não pode ser removida"
+                                : "Remover habilidade"
+                        }
+                        aria-label="Remover habilidade"
+                    >
+                        <Trash2 size={18} />
+                    </button>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <MainLayout>
@@ -1539,77 +1860,52 @@ export default function CharacterSheet() {
                                 </div>
                             )}
                             {abilities.length > 0 && (
-                                <div className="flex flex-col gap-3">
-                                    {abilities.map((ability) => {
-                                        const isOriginAbility =
-                                            originInfo?.id != null && ability.origin_id === originInfo.id
-                                        const metaParts = [
-                                            ability.is_active ? "Ativa" : "Passiva",
-                                            `PE ${ability.pe_cost ?? 0}`
-                                        ]
-                                        return (
-                                            <div
-                                                key={ability.id}
-                                                className="flex items-center justify-between gap-3 bg-zinc-900/70 border border-zinc-700 rounded-lg p-3"
-                                            >
-                                                <div className="flex flex-col gap-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-white font-text">
-                                                            {ability.name}
-                                                        </span>
-                                                        {!isOriginAbility && ability.ability_type && (
-                                                            <span className="text-red-400 border border-red-500/40 text-xs px-2 py-0.5 rounded">
-                                                                {formatEnum(ability.ability_type)}
-                                                            </span>
-                                                        )}
-                                                        {isOriginAbility && (
-                                                            <span className="text-emerald-300 border border-emerald-500/40 text-xs px-2 py-0.5 rounded">
-                                                                Origem
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    {metaParts.length > 0 && (
-                                                        <span className="text-zinc-400 text-xs font-text">
-                                                            {metaParts.join(" | ")}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setSelectedAbility(ability)
-                                                            setIsAbilityModalOpen(true)
-                                                        }}
-                                                        className="text-blue-400 hover:text-blue-300 transition-colors"
-                                                        title="Detalhes da habilidade"
-                                                        aria-label="Detalhes da habilidade"
-                                                    >
-                                                        <Info size={18} />
-                                                    </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setAbilityToRemove(ability)
-                                                                setIsRemoveConfirmOpen(true)
-                                                            }}
-                                                            disabled={
-                                                                removingAbilityId === ability.id || isOriginAbility
-                                                            }
-                                                            className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                                            title={
-                                                                isOriginAbility
-                                                                    ? "Habilidade de origem não pode ser removida"
-                                                                    : "Remover habilidade"
-                                                            }
-                                                            aria-label="Remover habilidade"
-                                                        >
-                                                            <Trash2 size={18} />
-                                                        </button>
-                                                </div>
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setAbilityTab("active")}
+                                            className={`px-3 py-2 rounded text-sm font-text border ${
+                                                abilityTab === "active"
+                                                    ? "bg-blue-500 border-blue-400 text-black"
+                                                    : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                                            }`}
+                                        >
+                                            Ativas
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setAbilityTab("passive")}
+                                            className={`px-3 py-2 rounded text-sm font-text border ${
+                                                abilityTab === "passive"
+                                                    ? "bg-blue-500 border-blue-400 text-black"
+                                                    : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                                            }`}
+                                        >
+                                            Passivas
+                                        </button>
+                                    </div>
+                                    {abilityTab === "active" ? (
+                                        activeAbilities.length === 0 ? (
+                                            <div className="text-zinc-400 font-text text-sm">
+                                                Nenhuma habilidade ativa.
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col gap-3">
+                                                {activeAbilities.map(renderAbilityItem)}
                                             </div>
                                         )
-                                    })}
+                                    ) : (
+                                        passiveAbilities.length === 0 ? (
+                                            <div className="text-zinc-400 font-text text-sm">
+                                                Nenhuma habilidade passiva.
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col gap-3">
+                                                {passiveAbilities.map(renderAbilityItem)}
+                                            </div>
+                                        )
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1742,6 +2038,21 @@ export default function CharacterSheet() {
                                 <div className="flex flex-col gap-3 items-start">
                                     {weapons.map((weapon) => {
                                         const isCustomWeapon = customWeaponIds.includes(weapon.id)
+                                        const specialAttackAttackBonus =
+                                            pendingSpecialAttack?.target === "attack"
+                                                ? pendingSpecialAttack.bonus
+                                                : 0
+                                        const specialAttackDamageBonus =
+                                            pendingSpecialAttack?.target === "damage"
+                                                ? pendingSpecialAttack.bonus
+                                                : 0
+                                        const firearmDamageBonus =
+                                            hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo"
+                                                ? Number(character.atrib_agility) || 0
+                                                : 0
+                                        const damageBonusLabel = formatSignedBonus(
+                                            firearmDamageBonus + specialAttackDamageBonus
+                                        )
                                         return (
                                             <div
                                                 key={weapon.id}
@@ -1825,7 +2136,7 @@ export default function CharacterSheet() {
                                                 >
                                                     <span>Teste</span>
                                                     <span className="text-xs text-blue-200">
-                                                        {getWeaponTestFormula(weapon)}
+                                                        {getWeaponTestFormula(weapon, specialAttackAttackBonus)}
                                                     </span>
                                                 </button>
                                                 <button
@@ -1836,6 +2147,7 @@ export default function CharacterSheet() {
                                                     <span>Normal</span>
                                                     <span className="text-xs text-red-200">
                                                         {weapon.damage_formula}
+                                                        {damageBonusLabel}
                                                     </span>
                                                 </button>
                                                 <button
@@ -1846,6 +2158,7 @@ export default function CharacterSheet() {
                                                     <span>Crítico</span>
                                                     <span className="text-xs text-red-300">
                                                         {getCriticalDamageLabel(weapon)}
+                                                        {damageBonusLabel}
                                                     </span>
                                                 </button>
                                             </div>
@@ -2027,6 +2340,120 @@ export default function CharacterSheet() {
                         ) : (
                             <span className="text-zinc-200">Efeito não disponível.</span>
                         )}
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isSpecialAttackModalOpen}
+                onClose={() => setIsSpecialAttackModalOpen(false)}
+                className="w-[min(100%-1.5rem,36rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Ataque Especial</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsSpecialAttackModalOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    <div className="flex flex-col gap-1">
+                        <div className="text-lg text-white">
+                            {specialAttackAbility?.name ?? "Ataque Especial"}
+                        </div>
+                        <div className="text-sm text-zinc-400">
+                            NEX atual: {character.nex_total}% | PE atual: {currentEffort}/{character.effort_max}
+                        </div>
+                    </div>
+                    {specialAttackAbility?.description?.trim() && (
+                        <div className="text-sm text-zinc-300">{specialAttackAbility.description}</div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                        <span className="text-zinc-400 text-sm">Bônus</span>
+                        {availableSpecialAttackOptions.length > 0 ? (
+                            <div className="flex flex-col gap-2">
+                                {availableSpecialAttackOptions.map((option) => {
+                                    const isSelected =
+                                        specialAttackOption?.bonus === option.bonus &&
+                                        specialAttackOption?.peCost === option.peCost &&
+                                        specialAttackOption?.nexMin === option.nexMin
+                                    return (
+                                        <button
+                                            key={`${option.nexMin}-${option.peCost}-${option.bonus}`}
+                                            type="button"
+                                            onClick={() => setSpecialAttackOption(option)}
+                                            className={`flex flex-col gap-1 rounded-lg border px-3 py-2 text-left transition-colors ${
+                                                isSelected
+                                                    ? "border-emerald-400 bg-emerald-500/20 text-emerald-100"
+                                                    : "border-zinc-700 bg-zinc-900/60 text-zinc-200 hover:border-emerald-400/60"
+                                            }`}
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-white font-text">+{option.bonus}</span>
+                                                <span className="text-xs text-zinc-400">PE {option.peCost}</span>
+                                            </div>
+                                            <span className="text-xs text-zinc-400">NEX {option.nexMin}%+</span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-zinc-300">
+                                Nenhum bônus disponível para o NEX atual.
+                            </div>
+                        )}
+                        {specialAttackOption && !canAffordSpecialAttack && (
+                            <div className="text-xs text-red-400">
+                                PE insuficiente para o bônus selecionado.
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        <span className="text-zinc-400 text-sm">Aplicar em</span>
+                        {specialAttackTargets.length > 1 ? (
+                            <div className="flex flex-wrap gap-2">
+                                {specialAttackTargets.map((target) => (
+                                    <button
+                                        key={target}
+                                        type="button"
+                                        onClick={() => setSpecialAttackTarget(target)}
+                                        className={`px-3 py-2 rounded border text-sm font-text transition-colors ${
+                                            specialAttackTarget === target
+                                                ? "bg-blue-500 border-blue-400 text-black"
+                                                : "bg-zinc-800 border-zinc-700 text-zinc-200 hover:border-blue-400/60"
+                                        }`}
+                                    >
+                                        {target === "attack" ? "Teste de ataque" : "Rolagem de dano"}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-zinc-200">
+                                {specialAttackTargets[0] === "attack"
+                                    ? "Teste de ataque"
+                                    : "Rolagem de dano"}
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex items-center justify-end gap-2 border-t border-zinc-700/70 pt-3">
+                        <button
+                            type="button"
+                            onClick={() => setIsSpecialAttackModalOpen(false)}
+                            className="px-3 py-2 rounded bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleApplySpecialAttack}
+                            disabled={!specialAttackOption || !canAffordSpecialAttack}
+                            className="px-3 py-2 rounded bg-emerald-500 text-black hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                            {specialAttackTarget === "attack" ? "Preparar para teste" : "Preparar para dano"}
+                        </button>
                     </div>
                 </div>
             </Modal>
@@ -2574,7 +3001,15 @@ export default function CharacterSheet() {
                         <div className="flex flex-col gap-2">
                             <div className="text-2xl text-white">
                                 Resultado:{" "}
-                                <span className="text-blue-300">{weaponRollResult.total}</span>
+                                <span className="text-blue-300">
+                                    {weaponRollResult.bonus
+                                        ? `${weaponRollResult.total - weaponRollResult.bonus} + ${weaponRollResult.bonus} = ${weaponRollResult.total}`
+                                        : weaponRollResult.total}
+                                </span>
+                            </div>
+                            <div className="text-sm text-zinc-300">
+                                Fórmula:{" "}
+                                <span className="text-white">{weaponRollResult.formula}</span>
                             </div>
                             <div className="text-sm text-zinc-300">
                                 Dados:{" "}
@@ -2582,6 +3017,19 @@ export default function CharacterSheet() {
                                     {weaponRollResult.dice.join(", ") || "-"}
                                 </span>
                             </div>
+                            {weaponRollResult.bonusParts && weaponRollResult.bonusParts.length > 0 ? (
+                                <div className="text-xs text-emerald-300 flex flex-col gap-1">
+                                    {weaponRollResult.bonusParts.map((part, index) => (
+                                        <div key={`${part.label}-${index}`}>
+                                            {part.label}: +{part.value}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : weaponRollResult.bonus ? (
+                                <div className="text-xs text-emerald-300">
+                                    {weaponRollResult.bonusLabel ?? "Bônus extra"}: +{weaponRollResult.bonus}
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>
@@ -2621,6 +3069,39 @@ export default function CharacterSheet() {
                 diff={levelUpDiff}
                 onClose={() => setLevelUpDiff(null)}
             />
+            {pendingSpecialAttack && (
+                <div className="fixed bottom-4 right-4 z-50">
+                    <div className="min-w-[16rem] max-w-88 rounded-lg border border-emerald-500/40 bg-emerald-900/30 px-4 py-3 text-emerald-100 shadow-lg backdrop-blur">
+                        <div className="text-sm font-text">Bônus preparado</div>
+                        <div className="text-lg text-white">
+                            +{pendingSpecialAttack.bonus} no {formatSpecialAttackTarget(pendingSpecialAttack.target)}
+                        </div>
+                        {passiveBonusNotes.length > 0 && (
+                            <div className="mt-3 border-t border-emerald-500/30 pt-2">
+                                <div className="text-xs text-emerald-200 tracking-wide">
+                                    Bônus passivos
+                                </div>
+                                <div className="mt-1 flex flex-col gap-1 text-xs text-emerald-100">
+                                    {passiveBonusNotes.map((note) => (
+                                        <div key={note.label}>
+                                            {note.label}: {note.detail}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        <div className="mt-2 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={handleCancelPendingSpecialAttack}
+                                className="text-xs text-emerald-100 hover:text-white underline underline-offset-2"
+                            >
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </MainLayout>
     )
 }

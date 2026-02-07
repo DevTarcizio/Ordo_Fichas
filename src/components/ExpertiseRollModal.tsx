@@ -11,6 +11,8 @@ export type ExpertiseRollResult = {
     extra: number
     bonus: number
     total: number
+    extra_bonus?: number
+    extra_label?: string
 }
 
 type Props = {
@@ -77,6 +79,11 @@ export default function ExpertiseRollModal({
                         <div className="text-sm text-zinc-300">
                             D20: <span className="text-white">{result.dice.join(", ") || "-"}</span>
                         </div>
+                        {result.extra_bonus ? (
+                            <div className="text-xs text-emerald-300">
+                                {result.extra_label ?? "Bônus extra"}: +{result.extra_bonus}
+                            </div>
+                        ) : null}
                     </div>
                 )}
             </div>
