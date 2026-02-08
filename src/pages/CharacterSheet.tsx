@@ -62,6 +62,8 @@ type SpecialAttackEffect = {
     appliesTo: SpecialAttackTarget[]
 }
 
+const UNARMED_WEAPON_ID = -1
+
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value))
 }
@@ -87,15 +89,17 @@ const parseSpecialAttackEffect = (
     const rawType = (effect as Record<string, unknown>).type
     if (rawType !== "attack_or_damage_bonus") return null
 
-    const rawOptions = Array.isArray((effect as Record<string, unknown>).options)
-        ? (effect as Record<string, unknown>).options
+    const effectRecord = effect as Record<string, unknown>
+    const rawOptions = Array.isArray(effectRecord["options"])
+        ? effectRecord["options"]
         : []
     const options = rawOptions
         .map((item) => {
+            if (!item || typeof item !== "object") return null
             const option = item as Record<string, unknown>
-            const nexMin = toFiniteNumber(option.nex_min)
-            const peCost = toFiniteNumber(option.pe_cost)
-            const bonus = toFiniteNumber(option.bonus)
+            const nexMin = toFiniteNumber(option["nex_min"])
+            const peCost = toFiniteNumber(option["pe_cost"])
+            const bonus = toFiniteNumber(option["bonus"])
             if (nexMin === null || peCost === null || bonus === null) return null
             const adjustedNexMin =
                 nexMin === 0 && bonus === 5 && peCost === 2
@@ -106,8 +110,8 @@ const parseSpecialAttackEffect = (
         .filter((option): option is SpecialAttackOption => option !== null)
         .sort((a, b) => a.nexMin - b.nexMin || a.peCost - b.peCost || a.bonus - b.bonus)
 
-    const rawAppliesTo = Array.isArray((effect as Record<string, unknown>).applies_to)
-        ? (effect as Record<string, unknown>).applies_to
+    const rawAppliesTo = Array.isArray(effectRecord["applies_to"])
+        ? effectRecord["applies_to"]
         : []
     const appliesTo = rawAppliesTo.filter(
         (item): item is SpecialAttackTarget => item === "attack" || item === "damage"
@@ -126,6 +130,8 @@ const formatSignedBonus = (value: number) => {
     if (!value) return ""
     return value > 0 ? `+${value}` : String(value)
 }
+
+const resistanceExpertiseSet = new Set(["fortitude", "reflexos", "vontade"])
 
 const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
     if (!origin) return ""
@@ -229,10 +235,18 @@ const weaponFormDefaults = {
     space: "1"
 }
 
-const getCriticalDamageLabel = (weapon: WeaponSummary) => {
-    const match = weapon.damage_formula.match(/^\s*(\d+)\s*[dD]\s*(\d+)\s*$/)
+const getUnarmedDamageFormula = (nexTotal: number, hasArtistaMarcial: boolean) => {
+    if (!hasArtistaMarcial) return "1d4"
+    if (nexTotal >= 70) return "1d10"
+    if (nexTotal >= 35) return "1d8"
+    return "1d6"
+}
+
+const getCriticalDamageLabel = (weapon: WeaponSummary, overrideFormula?: string) => {
+    const formula = overrideFormula ?? weapon.damage_formula
+    const match = formula.match(/^\s*(\d+)\s*[dD]\s*(\d+)\s*$/)
     if (!match) {
-        return `${weapon.damage_formula} x${weapon.critical_multiplier}`
+        return `${formula} x${weapon.critical_multiplier}`
     }
     const diceCount = Number(match[1])
     const diceSides = match[2]
@@ -278,6 +292,7 @@ export default function CharacterSheet() {
         bonus?: number
         bonusLabel?: string
         bonusParts?: { label: string; value: number }[]
+        notes?: string[]
     } | null>(null)
     const [isExpertiseEditOpen, setIsExpertiseEditOpen] = useState(false)
     const [expertiseForm, setExpertiseForm] = useState<ExpertiseEditForm | null>(null)
@@ -298,6 +313,14 @@ export default function CharacterSheet() {
     const [specialAttackTarget, setSpecialAttackTarget] = useState<SpecialAttackTarget>("attack")
     const [specialAttackOption, setSpecialAttackOption] = useState<SpecialAttackOption | null>(null)
     const [pendingSpecialAttack, setPendingSpecialAttack] = useState<PendingSpecialAttack | null>(null)
+    const [pendingDemolishingStrike, setPendingDemolishingStrike] = useState(false)
+    const [opportunityToast, setOpportunityToast] = useState<string | null>(null)
+    const [triggerHoldActive, setTriggerHoldActive] = useState(false)
+    const [triggerHoldUses, setTriggerHoldUses] = useState(0)
+    const [triggerHoldSpent, setTriggerHoldSpent] = useState(0)
+    const [sentidoTaticoActive, setSentidoTaticoActive] = useState(false)
+    const [defensiveCombatActive, setDefensiveCombatActive] = useState(false)
+    const [dualWieldActive, setDualWieldActive] = useState(false)
     const [weaponOptions, setWeaponOptions] = useState<WeaponSummary[]>([])
     const [weaponSearch, setWeaponSearch] = useState("")
     const [isWeaponPickerOpen, setIsWeaponPickerOpen] = useState(false)
@@ -415,6 +438,14 @@ export default function CharacterSheet() {
             isMounted = false
         }
     }, [isWeaponPickerOpen])
+
+    useEffect(() => {
+        if (!opportunityToast) return
+        const timeoutId = window.setTimeout(() => {
+            setOpportunityToast(null)
+        }, 8000)
+        return () => window.clearTimeout(timeoutId)
+    }, [opportunityToast])
 
     async function updateStatus(field: StatusField, newValue: number) {
         try {
@@ -744,7 +775,8 @@ export default function CharacterSheet() {
 
     const handleRollExpertise = async (
         expertiseName: string,
-        extraBonus?: { value: number; label?: string }
+        extraBonus?: { value: number; label?: string },
+        dicePenalty = 0
     ) => {
         setIsRollOpen(true)
         setIsRolling(true)
@@ -755,18 +787,45 @@ export default function CharacterSheet() {
                 `/characters/${character!.id}/expertise/${expertiseName}/roll`
             )
             const baseResult = response.data as ExpertiseRollResult
+            let adjustedResult = baseResult
+            if (dicePenalty > 0 && baseResult.dice.length > 0) {
+                const remainingDice = baseResult.dice.length - dicePenalty
+                if (remainingDice <= 0) {
+                    const penaltyDice = Array.from(
+                        { length: 2 },
+                        () => Math.floor(Math.random() * 20) + 1
+                    )
+                    const worstDie = Math.min(...penaltyDice)
+                    adjustedResult = {
+                        ...baseResult,
+                        dice: penaltyDice,
+                        dice_count: penaltyDice.length,
+                        total: worstDie + (baseResult.bonus ?? 0),
+                        roll_mode: "worst"
+                    }
+                } else {
+                    const trimmedDice = baseResult.dice.slice(0, Math.max(0, remainingDice))
+                    const maxDie = trimmedDice.length ? Math.max(...trimmedDice) : 0
+                    adjustedResult = {
+                        ...baseResult,
+                        dice: trimmedDice,
+                        dice_count: trimmedDice.length,
+                        total: maxDie + (baseResult.bonus ?? 0)
+                    }
+                }
+            }
             if (extraBonus && Number.isFinite(extraBonus.value) && extraBonus.value !== 0) {
-                const nextBonus = (baseResult.bonus ?? 0) + extraBonus.value
-                const nextTotal = (baseResult.total ?? 0) + extraBonus.value
+                const nextBonus = (adjustedResult.bonus ?? 0) + extraBonus.value
+                const nextTotal = (adjustedResult.total ?? 0) + extraBonus.value
                 setRollResult({
-                    ...baseResult,
+                    ...adjustedResult,
                     bonus: nextBonus,
                     total: nextTotal,
                     extra_bonus: extraBonus.value,
                     extra_label: extraBonus.label
                 })
             } else {
-                setRollResult(baseResult)
+                setRollResult(adjustedResult)
             }
         } catch (err) {
             console.error(err)
@@ -803,35 +862,59 @@ export default function CharacterSheet() {
         return pending
     }
 
+    const consumeDemolishingStrike = () => {
+        if (!pendingDemolishingStrike) return false
+        setPendingDemolishingStrike(false)
+        return true
+    }
+
     const handleWeaponTestRoll = (weapon: WeaponSummary) => {
         const expertiseName =
             weapon.weapon_range === "corpo_a_corpo" ? "luta" : "pontaria"
         const pending = consumeSpecialAttack("attack")
+        const dicePenalty =
+            (defensiveCombatActive ? 1 : 0) + (dualWieldActive ? 1 : 0)
         handleRollExpertise(
             expertiseName,
-            pending ? { value: pending.bonus, label: pending.label } : undefined
+            pending ? { value: pending.bonus, label: pending.label } : undefined,
+            dicePenalty
         )
     }
 
     const handleWeaponDamageRoll = (weapon: WeaponSummary, isCritical: boolean) => {
-        const parsed = parseDamageFormula(weapon.damage_formula)
+        const effectiveDamageFormula =
+            weapon.id === UNARMED_WEAPON_ID
+                ? getUnarmedDamageFormula(character?.nex_total ?? 0, hasArtistaMarcial)
+                : weapon.damage_formula
+        const parsed = parseDamageFormula(effectiveDamageFormula)
         if (!parsed) {
             alert("Formato de dano invalido. Use XdY, por exemplo: 3d6.")
             return
         }
         const pending = consumeSpecialAttack("damage")
+        const demolishingStrikeUsed = consumeDemolishingStrike()
         const multiplier = isCritical
             ? Math.max(1, Number(weapon.critical_multiplier) || 1)
             : 1
-        const diceCount = parsed.diceCount * multiplier
+        const extraDice =
+            (demolishingStrikeUsed ? 2 : 0)
+            + (hasGolpePesado && weapon.weapon_range === "corpo_a_corpo" ? 1 : 0)
+        const diceCount = parsed.diceCount * multiplier + extraDice
         const dice = rollDice(diceCount, parsed.diceSides)
         const baseTotal = dice.reduce((sum, value) => sum + value, 0)
         const bonusParts: { label: string; value: number }[] = []
+        const notes: string[] = []
         if (pending?.bonus) {
             bonusParts.push({
                 label: pending.label ?? "Ataque Especial",
                 value: pending.bonus
             })
+        }
+        if (demolishingStrikeUsed) {
+            notes.push(`Golpe Demolidor: +2d${parsed.diceSides}`)
+        }
+        if (hasGolpePesado && weapon.weapon_range === "corpo_a_corpo") {
+            notes.push(`Golpe Pesado: +1d${parsed.diceSides}`)
         }
         if (hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo") {
             const agilityBonus = Number(character?.atrib_agility ?? 0)
@@ -851,7 +934,8 @@ export default function CharacterSheet() {
             total,
             bonus: bonus || undefined,
             bonusLabel: bonusParts.length === 1 ? bonusParts[0].label : undefined,
-            bonusParts: bonusParts.length > 0 ? bonusParts : undefined
+            bonusParts: bonusParts.length > 0 ? bonusParts : undefined,
+            notes: notes.length > 0 ? notes : undefined
         })
         setIsWeaponRollOpen(true)
     }
@@ -860,12 +944,19 @@ export default function CharacterSheet() {
         const expertiseName =
             weapon.weapon_range === "corpo_a_corpo" ? "luta" : "pontaria"
         const attributeField = expertiseAttributeMap[expertiseName]
-        const diceCount =
+        const baseDiceCount =
             attributeField && character
                 ? Number(character[attributeField as keyof CharacterDetails]) || 0
                 : 0
+        const dicePenalty =
+            (defensiveCombatActive ? 1 : 0) + (dualWieldActive ? 1 : 0)
+        const rawDiceCount = baseDiceCount - dicePenalty
+        const diceCount = Math.max(0, rawDiceCount)
         const stats = expertise?.[expertiseName]
         const bonus = (stats?.treino ?? 0) + (stats?.extra ?? 0) + extraBonus
+        if (rawDiceCount <= 0 && dicePenalty > 0 && baseDiceCount > 0) {
+            return `-1d20${bonus > 0 ? `+${bonus}` : ""}`
+        }
         if (diceCount <= 0 && bonus <= 0) return "0d20"
         return `${diceCount}d20${bonus > 0 ? `+${bonus}` : ""}`
     }
@@ -886,6 +977,7 @@ export default function CharacterSheet() {
     }
 
     const openWeaponEdit = (weapon: WeaponSummary) => {
+        if (weapon.id === UNARMED_WEAPON_ID) return
         setWeaponToEdit(weapon)
         setWeaponForm({
             name: weapon.name ?? "",
@@ -1065,6 +1157,7 @@ export default function CharacterSheet() {
 
     const handleRemoveWeapon = async (weapon: WeaponSummary) => {
         if (!character) return
+        if (weapon.id === UNARMED_WEAPON_ID) return
         setRemovingWeaponId(weapon.id)
         try {
             const response = await api.delete(
@@ -1125,6 +1218,17 @@ export default function CharacterSheet() {
                     : null
             if (effectType === "attack_or_damage_bonus" || normalizeText(ability.name) === "ataque especial") {
                 setPendingSpecialAttack(null)
+            }
+            if (normalizeText(ability.name) === "golpe demolidor") {
+                setPendingDemolishingStrike(false)
+            }
+            if (normalizeText(ability.name) === "segurar gatilho") {
+                setTriggerHoldActive(false)
+                setTriggerHoldUses(0)
+                setTriggerHoldSpent(0)
+            }
+            if (normalizeText(ability.name) === "sentido tatico") {
+                setSentidoTaticoActive(false)
             }
         } catch (err) {
             console.error(err)
@@ -1286,18 +1390,30 @@ export default function CharacterSheet() {
     const proficiencies = (character.proficiencies ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
-    const weapons = (character.weapons ?? []).slice().sort((a, b) =>
+    const baseWeapons = (character.weapons ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
+    const unarmedWeapon: WeaponSummary = {
+        id: UNARMED_WEAPON_ID,
+        name: "Desarmado",
+        description: "Ataque desarmado.",
+        category: "desarmado",
+        damage_formula: "1d4",
+        threat_margin: 20,
+        critical_multiplier: 2,
+        weapon_range: "corpo_a_corpo",
+        space: 0
+    }
+    const weapons = [unarmedWeapon, ...baseWeapons]
     const trainedExpertise = new Set(
         Object.entries(expertise ?? {})
             .filter(([, stats]) => (stats?.treino ?? 0) > 0)
             .map(([name]) => name)
     )
     const abilityNameSet = new Set(abilities.map((ability) => normalizeText(ability.name)))
-    const resistanceBonus = character.resistance_bonus ?? 0
+    const baseResistanceBonus = character.resistance_bonus ?? 0
     const assignedAbilityIds = new Set(abilities.map((ability) => ability.id))
-    const assignedWeaponIds = new Set(weapons.map((weapon) => weapon.id))
+    const assignedWeaponIds = new Set(baseWeapons.map((weapon) => weapon.id))
     const abilitySearchTerm = abilitySearch.trim().toLowerCase()
     const characterClassKey = reverseFormatEnum(character.character_class)
     const weaponSearchTerm = normalizeText(weaponSearch.trim())
@@ -1418,6 +1534,24 @@ export default function CharacterSheet() {
         (option) => character.nex_total >= option.nexMin
     )
     const specialAttackTargets = specialAttackEffect?.appliesTo ?? ["attack", "damage"]
+    const specialAttackCostValues = Array.from(
+        new Set(
+            availableSpecialAttackOptions
+                .map((option) => option.peCost)
+                .filter((value) => Number.isFinite(value))
+        )
+    ).sort((a, b) => a - b)
+    const specialAttackCostLabel =
+        specialAttackCostValues.length > 0
+            ? `PE: ${specialAttackCostValues.join("/")}`
+            : "PE: -"
+    const artistaMarcialAbility = abilities.find(
+        (ability) => normalizeText(ability.name) === "artista marcial"
+    )
+    const hasArtistaMarcial = Boolean(artistaMarcialAbility)
+    const hasGolpePesado = abilities.some(
+        (ability) => normalizeText(ability.name) === "golpe pesado"
+    )
     const tiroCerteiroAbility = abilities.find((ability) => {
         const effectType =
             ability.effect && typeof ability.effect === "object"
@@ -1432,8 +1566,14 @@ export default function CharacterSheet() {
             ? { label: "Tiro Certeiro", detail: `+${tiroCerteiroBonusValue} no dano (armas de disparo)` }
             : null
     ].filter((item): item is { label: string; detail: string } => item !== null)
-    const activeAbilities = abilities.filter((ability) => Boolean(ability.is_active))
-    const passiveAbilities = abilities.filter((ability) => !ability.is_active)
+    const activeAbilities = abilities.filter(
+        (ability) =>
+            Boolean(ability.is_active) || normalizeText(ability.name) === "golpe demolidor"
+    )
+    const passiveAbilities = abilities.filter(
+        (ability) =>
+            !ability.is_active && normalizeText(ability.name) !== "golpe demolidor"
+    )
     const selectedAbilityRequirements = selectedAbility?.requirements ?? []
     const currentEffort = character.effort_points
     const selectedAbilityRequirementsText =
@@ -1444,6 +1584,26 @@ export default function CharacterSheet() {
         selectedAbility && selectedAbility.effect && Object.keys(selectedAbility.effect).length > 0
             ? toAbilityJson(selectedAbility.effect)
             : ""
+    const opportunityAttackCost = 1
+    const demolishingStrikeCost = 1
+    const tirelessCost = 2
+    const athleticReadinessCost = 1
+    const suppressiveFireCost = 1
+    const triggerHoldBaseCost = 2
+    const sentidoTaticoCost = 2
+    const sentidoTaticoBonus = sentidoTaticoActive ? Number(character.atrib_intellect) || 0 : 0
+    const defenseBonus = (defensiveCombatActive ? 5 : 0) + sentidoTaticoBonus
+    const resistanceBonus = baseResistanceBonus + sentidoTaticoBonus
+    const pePerRoundLimit = Number(character.PE_per_round) || 0
+    const triggerHoldMaxUses = 4
+    const triggerHoldNextCost =
+        triggerHoldUses < triggerHoldMaxUses ? (triggerHoldUses + 1) * 2 : 0
+    const triggerHoldNextTotal = triggerHoldSpent + triggerHoldNextCost
+    const canTriggerHoldReuse =
+        triggerHoldActive
+        && triggerHoldUses < triggerHoldMaxUses
+        && currentEffort >= triggerHoldNextCost
+        && (pePerRoundLimit <= 0 || triggerHoldNextTotal <= pePerRoundLimit)
 
     const openSpecialAttackModal = () => {
         const affordableOptions = availableSpecialAttackOptions.filter(
@@ -1487,6 +1647,138 @@ export default function CharacterSheet() {
         setPendingSpecialAttack(null)
     }
 
+    const handleActivateDefensiveCombat = () => {
+        setDefensiveCombatActive(true)
+    }
+
+    const handleDeactivateDefensiveCombat = () => {
+        setDefensiveCombatActive(false)
+    }
+
+    const handleActivateDualWield = () => {
+        setDualWieldActive(true)
+    }
+
+    const handleDeactivateDualWield = () => {
+        setDualWieldActive(false)
+    }
+
+    const handleActivateSentidoTatico = () => {
+        if (sentidoTaticoActive) return
+        if (sentidoTaticoCost > currentEffort) {
+            alert("PE insuficiente para Sentido Tático.")
+            return
+        }
+        handleStatusChange("effort_points", "effort_max", -sentidoTaticoCost)
+        setSentidoTaticoActive(true)
+    }
+
+    const handleDeactivateSentidoTatico = () => {
+        setSentidoTaticoActive(false)
+    }
+
+    const handleActivateDemolishingStrike = () => {
+        if (pendingDemolishingStrike) return
+        if (demolishingStrikeCost > currentEffort) {
+            alert("PE insuficiente para Golpe Demolidor.")
+            return
+        }
+        if (demolishingStrikeCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -demolishingStrikeCost)
+        }
+        setPendingDemolishingStrike(true)
+    }
+
+    const handleCancelDemolishingStrike = () => {
+        if (!pendingDemolishingStrike) return
+        if (demolishingStrikeCost > 0) {
+            handleStatusChange("effort_points", "effort_max", demolishingStrikeCost)
+        }
+        setPendingDemolishingStrike(false)
+    }
+
+    const handleUseOpportunityAttack = () => {
+        if (opportunityAttackCost > currentEffort) {
+            alert("PE insuficiente para Ataque de Oportunidade.")
+            return
+        }
+        if (opportunityAttackCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -opportunityAttackCost)
+        }
+        setOpportunityToast("Habilidade ataque de oportunidade ativa, gasto 1 PE")
+    }
+
+    const handleUseTireless = () => {
+        if (tirelessCost > currentEffort) {
+            alert("PE insuficiente para Incansável.")
+            return
+        }
+        if (tirelessCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -tirelessCost)
+        }
+        setOpportunityToast("Habilidade Incansável ativa, gasto 2 PE")
+    }
+
+    const handleUseAthleticReadiness = () => {
+        if (athleticReadinessCost > currentEffort) {
+            alert("PE insuficiente para Presteza Atlética.")
+            return
+        }
+        if (athleticReadinessCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -athleticReadinessCost)
+        }
+        setOpportunityToast("Habilidade Presteza Atlética ativa, gasto 1 PE")
+    }
+
+    const handleUseSuppressiveFire = () => {
+        if (suppressiveFireCost > currentEffort) {
+            alert("PE insuficiente para Tiro de Cobertura.")
+            return
+        }
+        if (suppressiveFireCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -suppressiveFireCost)
+        }
+        setOpportunityToast("Habilidade Tiro de Cobertura ativa, gasto 1 PE")
+    }
+
+    const handleActivateTriggerHold = () => {
+        if (triggerHoldActive) return
+        if (triggerHoldBaseCost > currentEffort) {
+            alert("PE insuficiente para Segurar Gatilho.")
+            return
+        }
+        if (pePerRoundLimit > 0 && triggerHoldBaseCost > pePerRoundLimit) {
+            alert("Custo excede o PE por rodada.")
+            return
+        }
+        handleStatusChange("effort_points", "effort_max", -triggerHoldBaseCost)
+        setTriggerHoldActive(true)
+        setTriggerHoldUses(1)
+        setTriggerHoldSpent(triggerHoldBaseCost)
+    }
+
+    const handleReuseTriggerHold = () => {
+        if (!triggerHoldActive) return
+        if (triggerHoldUses >= triggerHoldMaxUses) return
+        if (triggerHoldNextCost > currentEffort) {
+            alert("PE insuficiente para reutilizar Segurar Gatilho.")
+            return
+        }
+        if (pePerRoundLimit > 0 && triggerHoldNextTotal > pePerRoundLimit) {
+            alert("Custo total excede o PE por rodada.")
+            return
+        }
+        handleStatusChange("effort_points", "effort_max", -triggerHoldNextCost)
+        setTriggerHoldUses((prev) => prev + 1)
+        setTriggerHoldSpent((prev) => prev + triggerHoldNextCost)
+    }
+
+    const handleDeactivateTriggerHold = () => {
+        setTriggerHoldActive(false)
+        setTriggerHoldUses(0)
+        setTriggerHoldSpent(0)
+    }
+
     const canAffordSpecialAttack =
         Boolean(specialAttackOption) && currentEffort >= (specialAttackOption?.peCost ?? 0)
 
@@ -1494,27 +1786,109 @@ export default function CharacterSheet() {
         const isOriginAbility =
             originInfo?.id != null && ability.origin_id === originInfo.id
         const isSpecialAttack = specialAttackAbility?.id === ability.id
-        const metaParts = [
-            ability.is_active ? "Ativa" : "Passiva",
-            `PE ${ability.pe_cost ?? 0}`
-        ]
+        const isOpportunityAttack = normalizeText(ability.name) === "ataque de oportunidade"
+        const isDefensiveCombat = normalizeText(ability.name) === "combate defensivo"
+        const isDualWield = normalizeText(ability.name) === "combater com duas armas"
+        const isDemolishingStrike = normalizeText(ability.name) === "golpe demolidor"
+        const isTireless = normalizeText(ability.name) === "incansavel"
+        const isAthleticReadiness = normalizeText(ability.name) === "presteza atletica"
+        const isTriggerHold = normalizeText(ability.name) === "segurar gatilho"
+        const isSentidoTatico = normalizeText(ability.name) === "sentido tatico"
+        const isSuppressiveFire = normalizeText(ability.name) === "tiro de cobertura"
+        const isClickableAbility =
+            isSpecialAttack
+            || isOpportunityAttack
+            || isDefensiveCombat
+            || isDualWield
+            || isDemolishingStrike
+            || isTireless
+            || isAthleticReadiness
+            || isTriggerHold
+            || isSentidoTatico
+            || isSuppressiveFire
+        const basePeCost = ability.pe_cost ?? 0
+        const peCost = isDemolishingStrike
+            ? Math.max(demolishingStrikeCost, basePeCost)
+            : isTireless
+                ? Math.max(tirelessCost, basePeCost)
+                : isAthleticReadiness
+                    ? Math.max(athleticReadinessCost, basePeCost)
+                    : isTriggerHold
+                        ? Math.max(triggerHoldBaseCost, basePeCost)
+                        : isSentidoTatico
+                            ? Math.max(sentidoTaticoCost, basePeCost)
+                            : isSuppressiveFire
+                                ? Math.max(suppressiveFireCost, basePeCost)
+                            : basePeCost
+        const isAbilityActive = ability.is_active || isDemolishingStrike
+        const metaParts = [isAbilityActive ? "Ativa" : "Passiva"]
+        if (isAbilityActive || peCost > 0) {
+            if (!(isSpecialAttack && peCost === 0)) {
+                metaParts.push(`PE ${peCost}`)
+            }
+        }
+        if (isSpecialAttack && specialAttackCostValues.length > 0) {
+            metaParts.push(specialAttackCostLabel)
+        }
 
         return (
             <div
                 key={ability.id}
-                onClick={isSpecialAttack ? openSpecialAttackModal : undefined}
+                onClick={
+                    isSpecialAttack
+                        ? openSpecialAttackModal
+                        : isOpportunityAttack
+                            ? handleUseOpportunityAttack
+                            : isDefensiveCombat
+                                ? handleActivateDefensiveCombat
+                                : isDualWield
+                                    ? handleActivateDualWield
+                                    : isSentidoTatico
+                                        ? handleActivateSentidoTatico
+                                    : isDemolishingStrike
+                                        ? handleActivateDemolishingStrike
+                                        : isTireless
+                                            ? handleUseTireless
+                                            : isAthleticReadiness
+                                                ? handleUseAthleticReadiness
+                                                : isTriggerHold
+                                                    ? handleActivateTriggerHold
+                                                    : isSuppressiveFire
+                                                        ? handleUseSuppressiveFire
+                                                    : undefined
+                }
                 onKeyDown={(event) => {
-                    if (!isSpecialAttack) return
+                    if (!isClickableAbility) return
                     if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault()
-                        openSpecialAttackModal()
+                        if (isSpecialAttack) {
+                            openSpecialAttackModal()
+                        } else if (isOpportunityAttack) {
+                            handleUseOpportunityAttack()
+                        } else if (isDefensiveCombat) {
+                            handleActivateDefensiveCombat()
+                        } else if (isDualWield) {
+                            handleActivateDualWield()
+                        } else if (isSentidoTatico) {
+                            handleActivateSentidoTatico()
+                        } else if (isDemolishingStrike) {
+                            handleActivateDemolishingStrike()
+                        } else if (isTireless) {
+                            handleUseTireless()
+                        } else if (isAthleticReadiness) {
+                            handleUseAthleticReadiness()
+                        } else if (isTriggerHold) {
+                            handleActivateTriggerHold()
+                        } else if (isSuppressiveFire) {
+                            handleUseSuppressiveFire()
+                        }
                     }
                 }}
-                role={isSpecialAttack ? "button" : undefined}
-                tabIndex={isSpecialAttack ? 0 : undefined}
+                role={isClickableAbility ? "button" : undefined}
+                tabIndex={isClickableAbility ? 0 : undefined}
                 className={`flex items-center justify-between gap-3 bg-zinc-900/70 border border-zinc-700 rounded-lg p-3 ${
-                    isSpecialAttack
-                        ? "cursor-pointer hover:border-emerald-500/60 focus:outline-none focus:border-emerald-400/80"
+                    isClickableAbility
+                        ? "cursor-pointer hover:border-emerald-500/60 focus:outline-none"
                         : ""
                 }`}
             >
@@ -1778,19 +2152,19 @@ export default function CharacterSheet() {
                                     <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
                                         <div className="text-xs text-zinc-400 font-text">Passiva</div>
                                         <div className="text-white text-lg font-text">
-                                            {character.defense_passive}
+                                            {character.defense_passive + defenseBonus}
                                         </div>
                                     </div>
                                     <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
                                         <div className="text-xs text-zinc-400 font-text">Esquiva</div>
                                         <div className="text-white text-lg font-text">
-                                            {character.defense_dodging}
+                                            {character.defense_dodging + defenseBonus}
                                         </div>
                                     </div>
                                     <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
                                         <div className="text-xs text-zinc-400 font-text">Bloqueio</div>
                                         <div className="text-white text-lg font-text">
-                                            {character.defense_blocking}
+                                            {character.defense_blocking + defenseBonus}
                                         </div>
                                     </div>
                                 </div>
@@ -1956,7 +2330,22 @@ export default function CharacterSheet() {
                                                         >
                                                             <button
                                                                 type="button"
-                                                                onClick={() => handleRollExpertise(name)}
+                                                                onClick={() => {
+                                                                    const isResistance = resistanceExpertiseSet.has(name)
+                                                                    const bonusValue =
+                                                                        sentidoTaticoActive && isResistance
+                                                                            ? Number(character.atrib_intellect) || 0
+                                                                            : 0
+                                                                    handleRollExpertise(
+                                                                        name,
+                                                                        bonusValue > 0
+                                                                            ? {
+                                                                                value: bonusValue,
+                                                                                label: "Sentido Tático (Intelecto)"
+                                                                            }
+                                                                            : undefined
+                                                                    )
+                                                                }}
                                                                 className="flex-1 bg-zinc-900/70 border border-zinc-700 rounded p-2 text-left hover:border-blue-500 transition-colors"
                                                                 title="Rolar perícia"
                                                             >
@@ -2035,9 +2424,13 @@ export default function CharacterSheet() {
                                 </div>
                             )}
                             {weapons.length > 0 && (
-                                <div className="flex flex-col gap-3 items-start">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                     {weapons.map((weapon) => {
-                                        const isCustomWeapon = customWeaponIds.includes(weapon.id)
+                                        const isUnarmedWeapon = weapon.id === UNARMED_WEAPON_ID
+                                        const effectiveDamageFormula =
+                                            weapon.id === UNARMED_WEAPON_ID
+                                                ? getUnarmedDamageFormula(character.nex_total, hasArtistaMarcial)
+                                                : weapon.damage_formula
                                         const specialAttackAttackBonus =
                                             pendingSpecialAttack?.target === "attack"
                                                 ? pendingSpecialAttack.bonus
@@ -2046,6 +2439,19 @@ export default function CharacterSheet() {
                                             pendingSpecialAttack?.target === "damage"
                                                 ? pendingSpecialAttack.bonus
                                                 : 0
+                                        const damageFormulaParsed = parseDamageFormula(
+                                            effectiveDamageFormula
+                                        )
+                                        const demolishingStrikeLabel =
+                                            pendingDemolishingStrike && damageFormulaParsed
+                                                ? `+2d${damageFormulaParsed.diceSides}`
+                                                : ""
+                                        const golpePesadoLabel =
+                                            hasGolpePesado
+                                            && weapon.weapon_range === "corpo_a_corpo"
+                                            && damageFormulaParsed
+                                                ? `+1d${damageFormulaParsed.diceSides}`
+                                                : ""
                                         const firearmDamageBonus =
                                             hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo"
                                                 ? Number(character.atrib_agility) || 0
@@ -2053,12 +2459,14 @@ export default function CharacterSheet() {
                                         const damageBonusLabel = formatSignedBonus(
                                             firearmDamageBonus + specialAttackDamageBonus
                                         )
+                                        const extraDiceLabel = [demolishingStrikeLabel, golpePesadoLabel]
+                                            .filter(Boolean)
+                                            .join("")
+                                        const damageExtraLabel = `${extraDiceLabel}${damageBonusLabel}`
                                         return (
                                             <div
                                                 key={weapon.id}
-                                                className={`w-full md:w-104 border rounded-lg bg-zinc-900/70 overflow-hidden ${
-                                                    isCustomWeapon ? "border-red-500/80" : "border-zinc-700"
-                                                }`}
+                                                className="w-full border border-red-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
                                             >
                                             <div className="flex flex-col gap-3 px-4 pt-3 pb-0 border-b border-zinc-700/70">
                                                 <div className="flex items-center justify-between gap-2">
@@ -2089,8 +2497,9 @@ export default function CharacterSheet() {
                                                         <button
                                                             type="button"
                                                             onClick={() => openWeaponEdit(weapon)}
-                                                            className="text-yellow-400 hover:text-yellow-300 transition-colors"
-                                                            title="Editar arma"
+                                                            disabled={isUnarmedWeapon}
+                                                            className="text-yellow-400 hover:text-yellow-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                            title={isUnarmedWeapon ? "Arma desarmada não pode ser editada" : "Editar arma"}
                                                             aria-label="Editar arma"
                                                         >
                                                             <Pencil size={18} />
@@ -2098,11 +2507,13 @@ export default function CharacterSheet() {
                                                         <button
                                                             type="button"
                                                             onClick={() => {
+                                                                if (isUnarmedWeapon) return
                                                                 setWeaponToRemove(weapon)
                                                                 setIsWeaponRemoveConfirmOpen(true)
                                                             }}
-                                                            className="text-red-400 hover:text-red-300 transition-colors"
-                                                            title="Remover arma"
+                                                            disabled={isUnarmedWeapon}
+                                                            className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                            title={isUnarmedWeapon ? "Arma desarmada não pode ser removida" : "Remover arma"}
                                                             aria-label="Remover arma"
                                                         >
                                                             <Trash2 size={18} />
@@ -2146,8 +2557,8 @@ export default function CharacterSheet() {
                                                 >
                                                     <span>Normal</span>
                                                     <span className="text-xs text-red-200">
-                                                        {weapon.damage_formula}
-                                                        {damageBonusLabel}
+                                                        {effectiveDamageFormula}
+                                                        {damageExtraLabel}
                                                     </span>
                                                 </button>
                                                 <button
@@ -2157,8 +2568,8 @@ export default function CharacterSheet() {
                                                 >
                                                     <span>Crítico</span>
                                                     <span className="text-xs text-red-300">
-                                                        {getCriticalDamageLabel(weapon)}
-                                                        {damageBonusLabel}
+                                                        {getCriticalDamageLabel(weapon, effectiveDamageFormula)}
+                                                        {damageExtraLabel}
                                                     </span>
                                                 </button>
                                             </div>
@@ -2367,6 +2778,7 @@ export default function CharacterSheet() {
                         <div className="text-sm text-zinc-400">
                             NEX atual: {character.nex_total}% | PE atual: {currentEffort}/{character.effort_max}
                         </div>
+                        <div className="text-sm text-zinc-400">{specialAttackCostLabel}</div>
                     </div>
                     {specialAttackAbility?.description?.trim() && (
                         <div className="text-sm text-zinc-300">{specialAttackAbility.description}</div>
@@ -3030,6 +3442,13 @@ export default function CharacterSheet() {
                                     {weaponRollResult.bonusLabel ?? "Bônus extra"}: +{weaponRollResult.bonus}
                                 </div>
                             ) : null}
+                            {weaponRollResult.notes && weaponRollResult.notes.length > 0 && (
+                                <div className="text-xs text-emerald-200 flex flex-col gap-1">
+                                    {weaponRollResult.notes.map((note, index) => (
+                                        <div key={`${note}-${index}`}>{note}</div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -3069,37 +3488,120 @@ export default function CharacterSheet() {
                 diff={levelUpDiff}
                 onClose={() => setLevelUpDiff(null)}
             />
-            {pendingSpecialAttack && (
-                <div className="fixed bottom-4 right-4 z-50">
-                    <div className="min-w-[16rem] max-w-88 rounded-lg border border-emerald-500/40 bg-emerald-900/30 px-4 py-3 text-emerald-100 shadow-lg backdrop-blur">
-                        <div className="text-sm font-text">Bônus preparado</div>
-                        <div className="text-lg text-white">
-                            +{pendingSpecialAttack.bonus} no {formatSpecialAttackTarget(pendingSpecialAttack.target)}
-                        </div>
-                        {passiveBonusNotes.length > 0 && (
-                            <div className="mt-3 border-t border-emerald-500/30 pt-2">
-                                <div className="text-xs text-emerald-200 tracking-wide">
-                                    Bônus passivos
-                                </div>
-                                <div className="mt-1 flex flex-col gap-1 text-xs text-emerald-100">
-                                    {passiveBonusNotes.map((note) => (
-                                        <div key={note.label}>
-                                            {note.label}: {note.detail}
-                                        </div>
-                                    ))}
-                                </div>
+            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive) && (
+                <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+                    {pendingSpecialAttack && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-red-500/40 bg-red-900/30 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Ataque Especial</div>
+                            <div className="text-lg text-white">
+                                +{pendingSpecialAttack.bonus} no {formatSpecialAttackTarget(pendingSpecialAttack.target)}
                             </div>
-                        )}
-                        <div className="mt-2 flex justify-end">
-                            <button
-                                type="button"
-                                onClick={handleCancelPendingSpecialAttack}
-                                className="text-xs text-emerald-100 hover:text-white underline underline-offset-2"
-                            >
-                                Cancelar
-                            </button>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelPendingSpecialAttack}
+                                    className="text-xs text-red-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    )}
+                    {pendingDemolishingStrike && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-red-500/40 bg-red-900/30 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Golpe Demolidor</div>
+                            <div className="text-lg text-white">+2 dados de dano</div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelDemolishingStrike}
+                                    className="text-xs text-red-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {opportunityToast && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-amber-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">{opportunityToast}</div>
+                        </div>
+                    )}
+                    {defensiveCombatActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-blue-500/40 bg-blue-900/30 px-4 py-3 text-blue-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Combate defensivo ativo</div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleDeactivateDefensiveCombat}
+                                    className="text-xs text-blue-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Encerrar habilidade
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {sentidoTaticoActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-cyan-500/40 bg-cyan-900/30 px-4 py-3 text-cyan-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Sentido Tático ativo</div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleDeactivateSentidoTatico}
+                                    className="text-xs text-cyan-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Desligar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {triggerHoldActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-amber-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Segurar Gatilho ativo</div>
+                            <div className="text-lg text-white">PE gasto: {triggerHoldSpent}</div>
+                            <div className="mt-2 flex items-center justify-between gap-3 text-xs text-amber-200">
+                                <span>
+                                    Próximo custo: {triggerHoldNextCost > 0 ? `${triggerHoldNextCost} PE` : "-"}
+                                </span>
+                                <span>
+                                    Total/rodada: {pePerRoundLimit > 0 ? pePerRoundLimit : "-"}
+                                </span>
+                            </div>
+                            <div className="mt-3 flex items-center justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleReuseTriggerHold}
+                                    disabled={!canTriggerHoldReuse}
+                                    className="text-xs text-amber-100 hover:text-white underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {triggerHoldNextCost > 0
+                                        ? `Reutilizar (+${triggerHoldNextCost} PE)`
+                                        : "Reutilizar"}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDeactivateTriggerHold}
+                                    className="text-xs text-amber-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Desligar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {dualWieldActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-red-500/40 bg-red-900/30 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Combater com duas armas ativo</div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleDeactivateDualWield}
+                                    className="text-xs text-red-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Encerrar habilidade
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </MainLayout>

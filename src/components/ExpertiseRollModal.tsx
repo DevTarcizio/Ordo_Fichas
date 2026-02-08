@@ -13,6 +13,7 @@ export type ExpertiseRollResult = {
     total: number
     extra_bonus?: number
     extra_label?: string
+    roll_mode?: "best" | "worst"
 }
 
 type Props = {
@@ -57,21 +58,27 @@ export default function ExpertiseRollModal({
                     <div className="flex flex-col gap-2">
                         <div className="text-2xl text-white">
                             {(() => {
-                                const maxDie = result.dice.length ? Math.max(...result.dice) : 0
+                                const rollMode = result.roll_mode ?? "best"
+                                const dieValue = result.dice.length
+                                    ? rollMode === "worst"
+                                        ? Math.min(...result.dice)
+                                        : Math.max(...result.dice)
+                                    : 0
                                 const bonus = result.bonus
+                                const label = rollMode === "worst" ? "Pior Resultado" : "Resultado"
                                 return bonus > 0
                                     ? (
                                         <>
-                                            Resultado:{" "}
+                                            {label}:{" "}
                                             <span className="text-blue-300">
-                                                {maxDie} + {bonus} = {result.total}
+                                                {dieValue} + {bonus} = {result.total}
                                             </span>
                                         </>
                                     )
                                     : (
                                         <>
-                                            Resultado:{" "}
-                                            <span className="text-blue-300">{maxDie}</span>
+                                            {label}:{" "}
+                                            <span className="text-blue-300">{dieValue}</span>
                                         </>
                                     )
                             })()}
