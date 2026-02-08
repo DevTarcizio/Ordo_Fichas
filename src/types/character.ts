@@ -34,6 +34,8 @@ export type WeaponSummary = {
     critical_multiplier: number
     weapon_range: string
     space: number
+    proficiency_required?: string
+    weapon_type?: string
 }
 
 export type CharacterSummary = {

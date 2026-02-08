@@ -248,6 +248,14 @@ export default function CreateCharacter() {
 
     const canTrainExpertise = ["mundano", "combatente", "especialista", "ocultista"].includes(form.character_class)
     const intellectValue = Math.max(0, Number(form.atrib_intellect) || 0)
+    const nexTotalValue = Math.max(0, Number(form.nex_total) || 0)
+    const attributePoints = (() => {
+        if (nexTotalValue >= 95) return 8
+        if (nexTotalValue >= 80) return 7
+        if (nexTotalValue >= 50) return 6
+        if (nexTotalValue >= 20) return 5
+        return 4
+    })()
     const normalizedOriginExpertise = originExpertiseNames
         .map((name) => name.toLowerCase())
         .filter((name) => expertiseAttributeMap[name])
@@ -635,6 +643,10 @@ export default function CreateCharacter() {
                                 <h2 className="text-2xl font-smalltitle text-blue-400 mb-4 text-center">
                                     Atributos
                                 </h2>
+                                <div className="text-sm text-zinc-300 font-text text-center mb-4">
+                                    Com NEX total {nexTotalValue}%, você tem {attributePoints} pontos de atributo para
+                                    distribuir. Valor máximo inicial: 3.
+                                </div>
                                 <div className="w-full flex justify-center mt-10">
                                     <AttributesCard
                                         mode="edit"

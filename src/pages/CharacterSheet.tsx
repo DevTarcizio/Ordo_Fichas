@@ -5,7 +5,7 @@ import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
 import { Eye, EyeOff, Info, Pencil, Plus, Trash2, X } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
-import type { AbilitySummary, CharacterDetails, OriginSummary, WeaponSummary } from "../types/character"
+import type { AbilitySummary, CharacterDetails, OriginSummary, ProficiencySummary, WeaponSummary } from "../types/character"
 import CharacterEditModal from "../components/CharacterEditModal"
 import type { EditForm } from "../components/CharacterEditModal"
 import StatusEditModal from "../components/StatusEditModal"
@@ -133,6 +133,17 @@ const formatSignedBonus = (value: number) => {
 
 const resistanceExpertiseSet = new Set(["fortitude", "reflexos", "vontade"])
 
+const isTacticalWeapon = (weapon: WeaponSummary) => {
+    const proficiency = normalizeText(weapon.proficiency_required ?? "")
+    const category = normalizeText(weapon.category ?? "")
+    return (
+        proficiency === "armas_taticas"
+        || proficiency.includes("tatic")
+        || category.includes("tatic")
+        || category.includes("tactical")
+    )
+}
+
 const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
     if (!origin) return ""
     if (typeof origin === "string") return origin
@@ -224,6 +235,20 @@ const weaponRangeOptions = [
     { value: "longo", label: "Longo" }
 ]
 
+const weaponTypeOptions = [
+    { value: "", label: "Selecione" },
+    { value: "corpo_a_corpo", label: "Corpo a corpo" },
+    { value: "arma_de_fogo", label: "Arma de fogo" },
+    { value: "arma_de_disparo", label: "Arma de disparo" }
+]
+
+const weaponProficiencyOptions = [
+    { value: "", label: "Sem proficiência" },
+    { value: "armas_simples", label: "Armas simples" },
+    { value: "armas_taticas", label: "Armas táticas" },
+    { value: "armas_pesadas", label: "Armas pesadas" }
+]
+
 const weaponFormDefaults = {
     name: "",
     description: "",
@@ -232,7 +257,9 @@ const weaponFormDefaults = {
     threat_margin: "20",
     critical_multiplier: "2",
     weapon_range: "corpo_a_corpo",
-    space: "1"
+    space: "1",
+    proficiency_required: "",
+    weapon_type: ""
 }
 
 const getUnarmedDamageFormula = (nexTotal: number, hasArtistaMarcial: boolean) => {
@@ -916,6 +943,9 @@ export default function CharacterSheet() {
         if (hasGolpePesado && weapon.weapon_range === "corpo_a_corpo") {
             notes.push(`Golpe Pesado: +1d${parsed.diceSides}`)
         }
+        if (hasBalisticaAvancada && isTacticalWeapon(weapon)) {
+            bonusParts.push({ label: "Balística Avançada", value: 2 })
+        }
         if (hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo") {
             const agilityBonus = Number(character?.atrib_agility ?? 0)
             if (agilityBonus) {
@@ -987,7 +1017,9 @@ export default function CharacterSheet() {
             threat_margin: String(weapon.threat_margin ?? 20),
             critical_multiplier: String(weapon.critical_multiplier ?? 2),
             weapon_range: weapon.weapon_range ?? "corpo_a_corpo",
-            space: String(weapon.space ?? 1)
+            space: String(weapon.space ?? 1),
+            proficiency_required: weapon.proficiency_required ?? "",
+            weapon_type: weapon.weapon_type ?? ""
         })
         setWeaponPickerMode("edit")
         setIsWeaponPickerOpen(true)
@@ -1038,7 +1070,11 @@ export default function CharacterSheet() {
                 threat_margin: Number(weaponForm.threat_margin),
                 critical_multiplier: Number(weaponForm.critical_multiplier),
                 weapon_range: weaponForm.weapon_range,
-                space: Number(weaponForm.space)
+                space: Number(weaponForm.space),
+                ...(weaponForm.proficiency_required
+                    ? { proficiency_required: weaponForm.proficiency_required }
+                    : {}),
+                ...(weaponForm.weapon_type ? { weapon_type: weaponForm.weapon_type } : {})
             }
             const response = await api.patch(`/weapons/${weaponToEdit.id}`, payload)
             const updatedWeapon = response.data as WeaponSummary
@@ -1081,7 +1117,11 @@ export default function CharacterSheet() {
                 threat_margin: Number(weaponForm.threat_margin),
                 critical_multiplier: Number(weaponForm.critical_multiplier),
                 weapon_range: weaponForm.weapon_range,
-                space: Number(weaponForm.space)
+                space: Number(weaponForm.space),
+                ...(weaponForm.proficiency_required
+                    ? { proficiency_required: weaponForm.proficiency_required }
+                    : {}),
+                ...(weaponForm.weapon_type ? { weapon_type: weaponForm.weapon_type } : {})
             }
 
             const createdResponse = await api.post("/weapons/", payload)
@@ -1390,6 +1430,19 @@ export default function CharacterSheet() {
     const proficiencies = (character.proficiencies ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
+    const hasBalisticaAvancada = abilities.some(
+        (ability) => normalizeText(ability.name) === "balistica avancada"
+    )
+    const normalizedProficiencyNames = new Set(
+        proficiencies.map((proficiency) => normalizeText(proficiency.name))
+    )
+    const extraProficiencies: ProficiencySummary[] = []
+    if (hasBalisticaAvancada && !normalizedProficiencyNames.has("armas_taticas")) {
+        extraProficiencies.push({ id: -100, name: "armas_taticas" })
+    }
+    const displayProficiencies = [...proficiencies, ...extraProficiencies].sort((a, b) =>
+        a.name.localeCompare(b.name, "pt-BR")
+    )
     const baseWeapons = (character.weapons ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
@@ -1402,7 +1455,8 @@ export default function CharacterSheet() {
         threat_margin: 20,
         critical_multiplier: 2,
         weapon_range: "corpo_a_corpo",
-        space: 0
+        space: 0,
+        weapon_type: "corpo_a_corpo"
     }
     const weapons = [unarmedWeapon, ...baseWeapons]
     const trainedExpertise = new Set(
@@ -2087,13 +2141,13 @@ export default function CharacterSheet() {
                                             <Info size={16} />
                                         </button>
                                     </div>
-                                    {proficiencies.length === 0 ? (
+                                    {displayProficiencies.length === 0 ? (
                                         <div className="text-zinc-400 font-text text-sm">
                                             Nenhuma proficiência registrada.
                                         </div>
                                     ) : (
                                         <div className="flex flex-wrap gap-2 justify-center">
-                                            {proficiencies.map((proficiency) => (
+                                            {displayProficiencies.map((proficiency) => (
                                                 <span
                                                     key={proficiency.id}
                                                     className="bg-zinc-900/70 border border-zinc-700 text-zinc-200 text-sm font-text px-3 py-1 rounded-full"
@@ -2456,8 +2510,10 @@ export default function CharacterSheet() {
                                             hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo"
                                                 ? Number(character.atrib_agility) || 0
                                                 : 0
+                                        const tacticalDamageBonus =
+                                            hasBalisticaAvancada && isTacticalWeapon(weapon) ? 2 : 0
                                         const damageBonusLabel = formatSignedBonus(
-                                            firearmDamageBonus + specialAttackDamageBonus
+                                            firearmDamageBonus + specialAttackDamageBonus + tacticalDamageBonus
                                         )
                                         const extraDiceLabel = [demolishingStrikeLabel, golpePesadoLabel]
                                             .filter(Boolean)
@@ -3127,6 +3183,20 @@ export default function CharacterSheet() {
                                     options={weaponRangeOptions}
                                     onChange={handleWeaponSelectChange}
                                 />
+                                <FloatingSelect
+                                    label="Tipo de arma"
+                                    name="weapon_type"
+                                    value={weaponForm.weapon_type}
+                                    options={weaponTypeOptions}
+                                    onChange={handleWeaponSelectChange}
+                                />
+                                <FloatingSelect
+                                    label="Proficiência necessária"
+                                    name="proficiency_required"
+                                    value={weaponForm.proficiency_required}
+                                    options={weaponProficiencyOptions}
+                                    onChange={handleWeaponSelectChange}
+                                />
                                 <FloatingInput
                                     label="Espaço"
                                     name="space"
@@ -3215,6 +3285,20 @@ export default function CharacterSheet() {
                                     name="weapon_range"
                                     value={weaponForm.weapon_range}
                                     options={weaponRangeOptions}
+                                    onChange={handleWeaponSelectChange}
+                                />
+                                <FloatingSelect
+                                    label="Tipo de arma"
+                                    name="weapon_type"
+                                    value={weaponForm.weapon_type}
+                                    options={weaponTypeOptions}
+                                    onChange={handleWeaponSelectChange}
+                                />
+                                <FloatingSelect
+                                    label="Proficiência necessária"
+                                    name="proficiency_required"
+                                    value={weaponForm.proficiency_required}
+                                    options={weaponProficiencyOptions}
                                     onChange={handleWeaponSelectChange}
                                 />
                                 <FloatingInput
