@@ -132,6 +132,13 @@ const formatSignedBonus = (value: number) => {
 }
 
 const resistanceExpertiseSet = new Set(["fortitude", "reflexos", "vontade"])
+const trilhaCertaExpertiseSet = new Set(["investigacao", "escutar", "observar"])
+const primeiraImpressaoExpertiseSet = new Set([
+    "diplomacia",
+    "enganacao",
+    "intimidacao",
+    "intuicao"
+])
 
 const isTacticalWeapon = (weapon: WeaponSummary) => {
     const proficiency = normalizeText(weapon.proficiency_required ?? "")
@@ -142,6 +149,11 @@ const isTacticalWeapon = (weapon: WeaponSummary) => {
         || category.includes("tatic")
         || category.includes("tactical")
     )
+}
+
+const isFirearmWeapon = (weapon: WeaponSummary) => {
+    const type = normalizeText(weapon.weapon_type ?? "")
+    return type === "arma_de_fogo" || type === "arma de fogo"
 }
 
 const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
@@ -346,6 +358,23 @@ export default function CharacterSheet() {
     const [triggerHoldUses, setTriggerHoldUses] = useState(0)
     const [triggerHoldSpent, setTriggerHoldSpent] = useState(0)
     const [sentidoTaticoActive, setSentidoTaticoActive] = useState(false)
+    const [conhecimentoAplicadoActive, setConhecimentoAplicadoActive] = useState(false)
+    const [ecleticoActive, setEcleticoActive] = useState(false)
+    const [isQuickHandsPromptOpen, setIsQuickHandsPromptOpen] = useState(false)
+    const [isPrimeiraImpressaoPromptOpen, setIsPrimeiraImpressaoPromptOpen] = useState(false)
+    const [pendingPrimeiraImpressao, setPendingPrimeiraImpressao] = useState<{
+        expertiseName: string
+        extraBonus?: { value: number; label?: string }
+        dicePenalty: number
+        options?: { successMin?: number; successLabel?: string }
+    } | null>(null)
+    const [trilhaCertaBonusDice, setTrilhaCertaBonusDice] = useState(0)
+    const [isTrilhaCertaPromptOpen, setIsTrilhaCertaPromptOpen] = useState(false)
+    const [peritoSkills, setPeritoSkills] = useState<string[]>([])
+    const [peritoSkillDraft, setPeritoSkillDraft] = useState<string[]>([])
+    const [isPeritoConfigOpen, setIsPeritoConfigOpen] = useState(false)
+    const [isPeritoUseOpen, setIsPeritoUseOpen] = useState(false)
+    const [pendingPerito, setPendingPerito] = useState<{ peCost: number; diceSides: number } | null>(null)
     const [defensiveCombatActive, setDefensiveCombatActive] = useState(false)
     const [dualWieldActive, setDualWieldActive] = useState(false)
     const [weaponOptions, setWeaponOptions] = useState<WeaponSummary[]>([])
@@ -473,6 +502,53 @@ export default function CharacterSheet() {
         }, 8000)
         return () => window.clearTimeout(timeoutId)
     }, [opportunityToast])
+
+    useEffect(() => {
+        if (!isRollOpen && trilhaCertaBonusDice === 0) {
+            setIsTrilhaCertaPromptOpen(false)
+        }
+    }, [isRollOpen, trilhaCertaBonusDice])
+
+    useEffect(() => {
+        if (!character) return
+        const storageKey = `perito_skills_${character.id}`
+        const allowedNames = Object.entries(expertise ?? {})
+            .filter(([, stats]) => (stats?.treino ?? 0) > 0)
+            .map(([name]) => name)
+            .filter((name) => {
+                const normalized = normalizeText(name)
+                return normalized !== "luta" && normalized !== "pontaria"
+            })
+        const allowedSet = new Set(allowedNames.map((name) => normalizeText(name)))
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) {
+            setPeritoSkills([])
+            return
+        }
+        try {
+            const parsed = JSON.parse(raw)
+            if (!Array.isArray(parsed)) {
+                setPeritoSkills([])
+                return
+            }
+            const resolved = parsed
+                .map((name) => {
+                    if (typeof name !== "string") return null
+                    const normalized = normalizeText(name)
+                    if (!allowedSet.has(normalized)) return null
+                    const original = allowedNames.find(
+                        (item) => normalizeText(item) === normalized
+                    )
+                    return original ?? null
+                })
+                .filter((name): name is string => Boolean(name))
+            const unique = Array.from(new Set(resolved)).slice(0, 2)
+            setPeritoSkills(unique)
+        } catch {
+            setPeritoSkills([])
+        }
+    }, [character?.id, expertise])
+
 
     async function updateStatus(field: StatusField, newValue: number) {
         try {
@@ -803,56 +879,200 @@ export default function CharacterSheet() {
     const handleRollExpertise = async (
         expertiseName: string,
         extraBonus?: { value: number; label?: string },
-        dicePenalty = 0
+        dicePenalty = 0,
+        options?: {
+            successMin?: number
+            successLabel?: string
+            extraDice?: number
+            extraDiceLabel?: string
+        }
     ) => {
         setIsRollOpen(true)
         setIsRolling(true)
         setRollResult(null)
+        const shouldPromptTrilhaCerta =
+            hasNaTrilhaCerta && trilhaCertaExpertiseSet.has(normalizeText(expertiseName))
+        setIsTrilhaCertaPromptOpen(shouldPromptTrilhaCerta || trilhaCertaBonusDice > 0)
 
         try {
+            const shouldApplyConhecimento = consumeConhecimentoAplicado(expertiseName)
             const response = await api.get(
                 `/characters/${character!.id}/expertise/${expertiseName}/roll`
             )
             const baseResult = response.data as ExpertiseRollResult
+            const trainedValue =
+                expertise?.[expertiseName]?.treino ?? baseResult.treino ?? 0
+            const isUntrained = trainedValue <= 0
+            const shouldApplyEcletico = ecleticoActive && isUntrained
+            const ecleticoBonus = shouldApplyEcletico ? 5 : 0
+            const hackerBonus = getHackerBonusForExpertise(expertiseName)
+            const peritoEligible =
+                pendingPerito
+                && hasPerito
+                && trainedValue > 0
+                && peritoSelectedSet.has(normalizeText(expertiseName))
+            const peritoBonusValue = peritoEligible
+                ? Math.floor(Math.random() * pendingPerito!.diceSides) + 1
+                : 0
+            const peritoBonusDice = peritoEligible
+                ? `1d${pendingPerito!.diceSides}`
+                : undefined
+            if (shouldApplyEcletico) {
+                setEcleticoActive(false)
+            }
+            if (peritoEligible) {
+                setPendingPerito(null)
+            }
+            if (hasMaosRapidas && normalizeText(expertiseName) === "crime") {
+                setIsQuickHandsPromptOpen(true)
+            }
             let adjustedResult = baseResult
-            if (dicePenalty > 0 && baseResult.dice.length > 0) {
-                const remainingDice = baseResult.dice.length - dicePenalty
+            if (shouldApplyConhecimento) {
+                const intellectValue = Math.max(0, Number(character?.atrib_intellect ?? 0))
+                const dice = Array.from(
+                    { length: intellectValue },
+                    () => Math.floor(Math.random() * 20) + 1
+                )
+                const maxDie = dice.length ? Math.max(...dice) : 0
+                const bonus = baseResult.bonus ?? 0
+                const attributeKey =
+                    typeof baseResult.attribute === "string" && baseResult.attribute.startsWith("atrib_")
+                        ? "atrib_intellect"
+                        : attributeLabelMap.atrib_intellect ?? "Intelecto"
+                adjustedResult = {
+                    ...baseResult,
+                    attribute: attributeKey,
+                    attribute_value: intellectValue,
+                    dice_count: dice.length,
+                    dice,
+                    total: maxDie + bonus
+                }
+            }
+            if (dicePenalty > 0 && adjustedResult.dice.length > 0) {
+                const remainingDice = adjustedResult.dice.length - dicePenalty
                 if (remainingDice <= 0) {
                     const penaltyDice = Array.from(
                         { length: 2 },
                         () => Math.floor(Math.random() * 20) + 1
                     )
                     const worstDie = Math.min(...penaltyDice)
+                    const bonus = adjustedResult.bonus ?? 0
                     adjustedResult = {
-                        ...baseResult,
+                        ...adjustedResult,
                         dice: penaltyDice,
                         dice_count: penaltyDice.length,
-                        total: worstDie + (baseResult.bonus ?? 0),
+                        total: worstDie + bonus,
                         roll_mode: "worst"
                     }
                 } else {
-                    const trimmedDice = baseResult.dice.slice(0, Math.max(0, remainingDice))
+                    const trimmedDice = adjustedResult.dice.slice(0, Math.max(0, remainingDice))
                     const maxDie = trimmedDice.length ? Math.max(...trimmedDice) : 0
+                    const bonus = adjustedResult.bonus ?? 0
                     adjustedResult = {
-                        ...baseResult,
+                        ...adjustedResult,
                         dice: trimmedDice,
                         dice_count: trimmedDice.length,
-                        total: maxDie + (baseResult.bonus ?? 0)
+                        total: maxDie + bonus
                     }
                 }
             }
-            if (extraBonus && Number.isFinite(extraBonus.value) && extraBonus.value !== 0) {
-                const nextBonus = (adjustedResult.bonus ?? 0) + extraBonus.value
-                const nextTotal = (adjustedResult.total ?? 0) + extraBonus.value
+            const trilhaCertaDiceToUse =
+                trilhaCertaBonusDice > 0
+                && trilhaCertaExpertiseSet.has(normalizeText(expertiseName))
+                    ? trilhaCertaBonusDice
+                    : 0
+            if (trilhaCertaDiceToUse > 0) {
+                const extraDice = Array.from(
+                    { length: trilhaCertaDiceToUse },
+                    () => Math.floor(Math.random() * 20) + 1
+                )
+                const combinedDice = [...adjustedResult.dice, ...extraDice]
+                const rollMode = adjustedResult.roll_mode ?? "best"
+                const dieValue = combinedDice.length
+                    ? rollMode === "worst"
+                        ? Math.min(...combinedDice)
+                        : Math.max(...combinedDice)
+                    : 0
+                const bonus = adjustedResult.bonus ?? 0
+                adjustedResult = {
+                    ...adjustedResult,
+                    dice: combinedDice,
+                    dice_count: combinedDice.length,
+                    total: dieValue + bonus,
+                    trilha_certa_bonus_dice: trilhaCertaDiceToUse
+                }
+            }
+            const extraDiceCount = Math.max(0, options?.extraDice ?? 0)
+            if (extraDiceCount > 0) {
+                const extraDice = Array.from(
+                    { length: extraDiceCount },
+                    () => Math.floor(Math.random() * 20) + 1
+                )
+                const combinedDice = [...adjustedResult.dice, ...extraDice]
+                const rollMode = adjustedResult.roll_mode ?? "best"
+                const dieValue = combinedDice.length
+                    ? rollMode === "worst"
+                        ? Math.min(...combinedDice)
+                        : Math.max(...combinedDice)
+                    : 0
+                const bonus = adjustedResult.bonus ?? 0
+                adjustedResult = {
+                    ...adjustedResult,
+                    dice: combinedDice,
+                    dice_count: combinedDice.length,
+                    total: dieValue + bonus,
+                    primeira_impressao_bonus_dice: extraDiceCount,
+                    primeira_impressao_label: options?.extraDiceLabel
+                }
+            }
+            const combinedExtraBonus = (() => {
+                const extras: { value: number; label?: string }[] = []
+                if (extraBonus && Number.isFinite(extraBonus.value) && extraBonus.value !== 0) {
+                    extras.push(extraBonus)
+                }
+                if (hackerBonus) {
+                    extras.push({ value: hackerBonus, label: "Hacker" })
+                }
+                if (peritoBonusValue) {
+                    extras.push({
+                        value: peritoBonusValue,
+                        label: peritoBonusDice ? `Perito (${peritoBonusDice})` : "Perito"
+                    })
+                }
+                if (ecleticoBonus) {
+                    extras.push({ value: ecleticoBonus, label: "Eclético" })
+                }
+                if (extras.length === 0) return null
+                if (extras.length === 1) return extras[0]
+                return {
+                    value: extras.reduce((sum, item) => sum + item.value, 0),
+                    label: extras.map((item) => item.label ?? "Bônus").join(" + ")
+                }
+            })()
+            const successInfo = options?.successMin
+                ? { success_min: options.successMin, success_label: options.successLabel }
+                : {}
+            const peritoInfo = peritoBonusValue
+                ? { perito_bonus_value: peritoBonusValue, perito_bonus_dice: peritoBonusDice }
+                : {}
+            if (combinedExtraBonus && Number.isFinite(combinedExtraBonus.value) && combinedExtraBonus.value !== 0) {
+                const nextBonus = (adjustedResult.bonus ?? 0) + combinedExtraBonus.value
+                const nextTotal = (adjustedResult.total ?? 0) + combinedExtraBonus.value
                 setRollResult({
                     ...adjustedResult,
+                    ...successInfo,
+                    ...peritoInfo,
                     bonus: nextBonus,
                     total: nextTotal,
-                    extra_bonus: extraBonus.value,
-                    extra_label: extraBonus.label
+                    extra_bonus: combinedExtraBonus.value,
+                    extra_label: combinedExtraBonus.label
                 })
             } else {
-                setRollResult(adjustedResult)
+                setRollResult({
+                    ...adjustedResult,
+                    ...successInfo,
+                    ...peritoInfo
+                })
             }
         } catch (err) {
             console.error(err)
@@ -862,11 +1082,34 @@ export default function CharacterSheet() {
         }
     }
 
+    const requestRollExpertise = (
+        expertiseName: string,
+        extraBonus?: { value: number; label?: string },
+        dicePenalty = 0,
+        options?: { successMin?: number; successLabel?: string }
+    ) => {
+        if (
+            hasPrimeiraImpressao
+            && primeiraImpressaoExpertiseSet.has(normalizeText(expertiseName))
+        ) {
+            setPendingPrimeiraImpressao({
+                expertiseName,
+                extraBonus,
+                dicePenalty,
+                options
+            })
+            setIsPrimeiraImpressaoPromptOpen(true)
+            return
+        }
+        handleRollExpertise(expertiseName, extraBonus, dicePenalty, options)
+    }
+
     const handleRollAttribute = (attribute: keyof typeof attributeKeyLabelMap, value: number) => {
         const diceCount = Math.max(0, value)
         const dice = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 20) + 1)
         const maxDie = dice.length ? Math.max(...dice) : 0
 
+        setIsTrilhaCertaPromptOpen(false)
         setRollResult({
             expertise: attributeKeyLabelMap[attribute] ?? formatEnum(attribute),
             attribute: attributeKeyLabelMap[attribute] ?? formatEnum(attribute),
@@ -895,15 +1138,39 @@ export default function CharacterSheet() {
         return true
     }
 
+    const consumeConhecimentoAplicado = (expertiseName: string) => {
+        if (!conhecimentoAplicadoActive) return false
+        const normalized = normalizeText(expertiseName)
+        if (normalized === "luta" || normalized === "pontaria") return false
+        setConhecimentoAplicadoActive(false)
+        return true
+    }
+
     const handleWeaponTestRoll = (weapon: WeaponSummary) => {
         const expertiseName =
             weapon.weapon_range === "corpo_a_corpo" ? "luta" : "pontaria"
         const pending = consumeSpecialAttack("attack")
+        const bonusParts: { value: number; label: string }[] = []
+        if (pending?.bonus) {
+            bonusParts.push({
+                value: pending.bonus,
+                label: pending.label ?? "Ataque Especial"
+            })
+        }
+        const extraBonus =
+            bonusParts.length === 0
+                ? undefined
+                : bonusParts.length === 1
+                    ? { value: bonusParts[0].value, label: bonusParts[0].label }
+                    : {
+                        value: bonusParts.reduce((sum, part) => sum + part.value, 0),
+                        label: bonusParts.map((part) => part.label).join(" + ")
+                    }
         const dicePenalty =
             (defensiveCombatActive ? 1 : 0) + (dualWieldActive ? 1 : 0)
         handleRollExpertise(
             expertiseName,
-            pending ? { value: pending.bonus, label: pending.label } : undefined,
+            extraBonus,
             dicePenalty
         )
     }
@@ -945,6 +1212,9 @@ export default function CharacterSheet() {
         }
         if (hasBalisticaAvancada && isTacticalWeapon(weapon)) {
             bonusParts.push({ label: "Balística Avançada", value: 2 })
+        }
+        if (hasNinjaUrbano && isTacticalWeapon(weapon) && !isFirearmWeapon(weapon)) {
+            bonusParts.push({ label: "Ninja Urbano", value: 2 })
         }
         if (hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo") {
             const agilityBonus = Number(character?.atrib_agility ?? 0)
@@ -1049,6 +1319,9 @@ export default function CharacterSheet() {
             maybeUpdateOriginInfo(updated)
             setIsAbilityPickerOpen(false)
             setAbilitySearch("")
+            if (normalizeText(ability.name) === "perito") {
+                openPeritoConfig()
+            }
         } catch (err) {
             console.error(err)
             alert("Erro ao adicionar habilidade")
@@ -1270,6 +1543,26 @@ export default function CharacterSheet() {
             if (normalizeText(ability.name) === "sentido tatico") {
                 setSentidoTaticoActive(false)
             }
+            if (normalizeText(ability.name) === "conhecimento aplicado") {
+                setConhecimentoAplicadoActive(false)
+            }
+            if (normalizeText(ability.name) === "ecletico") {
+                setEcleticoActive(false)
+            }
+            if (normalizeText(ability.name) === "na trilha certa") {
+                setTrilhaCertaBonusDice(0)
+                setIsTrilhaCertaPromptOpen(false)
+            }
+            if (normalizeText(ability.name) === "perito") {
+                setPendingPerito(null)
+                setPeritoSkills([])
+                setPeritoSkillDraft([])
+                localStorage.removeItem(peritoStorageKey)
+            }
+            if (normalizeText(ability.name) === "primeira impressao") {
+                setPendingPrimeiraImpressao(null)
+                setIsPrimeiraImpressaoPromptOpen(false)
+            }
         } catch (err) {
             console.error(err)
             alert("Erro ao remover habilidade")
@@ -1433,12 +1726,21 @@ export default function CharacterSheet() {
     const hasBalisticaAvancada = abilities.some(
         (ability) => normalizeText(ability.name) === "balistica avancada"
     )
+    const hasNinjaUrbano = abilities.some(
+        (ability) => normalizeText(ability.name) === "ninja urbano"
+    )
     const normalizedProficiencyNames = new Set(
         proficiencies.map((proficiency) => normalizeText(proficiency.name))
     )
     const extraProficiencies: ProficiencySummary[] = []
-    if (hasBalisticaAvancada && !normalizedProficiencyNames.has("armas_taticas")) {
+    let hasTacticalProficiency = normalizedProficiencyNames.has("armas_taticas")
+    if (hasBalisticaAvancada && !hasTacticalProficiency) {
         extraProficiencies.push({ id: -100, name: "armas_taticas" })
+        hasTacticalProficiency = true
+    }
+    if (hasNinjaUrbano && !hasTacticalProficiency) {
+        extraProficiencies.push({ id: -101, name: "armas_taticas" })
+        hasTacticalProficiency = true
     }
     const displayProficiencies = [...proficiencies, ...extraProficiencies].sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
@@ -1487,6 +1789,51 @@ export default function CharacterSheet() {
         presence: character.atrib_presence,
         vitallity: character.atrib_vitallity
     }
+    const hasHacker = abilities.some(
+        (ability) => normalizeText(ability.name) === "hacker"
+    )
+    const hasMaosRapidas = abilities.some(
+        (ability) => normalizeText(ability.name) === "maos rapidas"
+    )
+    const hasPrimeiraImpressao = abilities.some(
+        (ability) => normalizeText(ability.name) === "primeira impressao"
+    )
+    const hasPerito = abilities.some(
+        (ability) => normalizeText(ability.name) === "perito"
+    )
+    const hasNaTrilhaCerta = abilities.some(
+        (ability) => normalizeText(ability.name) === "na trilha certa"
+    )
+    const hackerBonusValue = hasHacker ? 5 : 0
+    const getHackerBonusForExpertise = (name: string) =>
+        hackerBonusValue && normalizeText(name) === "tecnologia" ? hackerBonusValue : 0
+    const getEffectiveExpertiseStats = (name: string, stats?: ExpertiseStats | null) => {
+        if (!stats) return stats ?? null
+        const bonus = getHackerBonusForExpertise(name)
+        if (!bonus) return stats
+        return {
+            ...stats,
+            extra: (stats.extra ?? 0) + bonus,
+            total: (stats.total ?? 0) + bonus
+        }
+    }
+    const peritoStorageKey = `perito_skills_${character.id}`
+    const peritoSkillOptions = Object.entries(expertise ?? {})
+        .filter(([, stats]) => (stats?.treino ?? 0) > 0)
+        .map(([name]) => name)
+        .filter((name) => {
+            const normalized = normalizeText(name)
+            return normalized !== "luta" && normalized !== "pontaria"
+        })
+        .map((name) => ({
+            name,
+            label: expertiseLabelMap[name] ?? formatEnum(name)
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"))
+    const peritoSelectedSet = new Set(peritoSkills.map((name) => normalizeText(name)))
+    const peritoSkillLabels = peritoSkills
+        .map((name) => expertiseLabelMap[name] ?? formatEnum(name))
+        .join(", ")
 
     const getAbilityRequirementIssues = (ability: AbilitySummary) => {
         const rawRequirements = ability.requirements as unknown
@@ -1643,12 +1990,36 @@ export default function CharacterSheet() {
     const tirelessCost = 2
     const athleticReadinessCost = 1
     const suppressiveFireCost = 1
+    const tacticalMovementCost = 1
+    const quickHandsCost = 1
+    const nerdCost = 2
+    const pensamentoAgilCost = 2
+    const trilhaCertaBaseCost = 1
     const triggerHoldBaseCost = 2
     const sentidoTaticoCost = 2
+    const conhecimentoAplicadoCost = 2
+    const ecleticoCost = 2
     const sentidoTaticoBonus = sentidoTaticoActive ? Number(character.atrib_intellect) || 0 : 0
     const defenseBonus = (defensiveCombatActive ? 5 : 0) + sentidoTaticoBonus
     const resistanceBonus = baseResistanceBonus + sentidoTaticoBonus
     const pePerRoundLimit = Number(character.PE_per_round) || 0
+    const trilhaCertaNextCost = trilhaCertaBaseCost + trilhaCertaBonusDice
+    const trilhaCertaTotalCost = (trilhaCertaBonusDice * (trilhaCertaBonusDice + 1)) / 2
+    const trilhaCertaNextTotalCost = trilhaCertaTotalCost + trilhaCertaNextCost
+    const canActivateTrilhaCerta =
+        hasNaTrilhaCerta
+        && trilhaCertaNextCost > 0
+        && currentEffort >= trilhaCertaNextCost
+        && (pePerRoundLimit <= 0 || trilhaCertaNextTotalCost <= pePerRoundLimit)
+    const peritoOptions = [
+        { nexMin: 0, peCost: 2, diceSides: 6 },
+        { nexMin: 25, peCost: 3, diceSides: 8 },
+        { nexMin: 55, peCost: 4, diceSides: 10 },
+        { nexMin: 85, peCost: 5, diceSides: 12 }
+    ]
+    const availablePeritoOptions = peritoOptions.filter(
+        (option) => character.nex_total >= option.nexMin
+    )
     const triggerHoldMaxUses = 4
     const triggerHoldNextCost =
         triggerHoldUses < triggerHoldMaxUses ? (triggerHoldUses + 1) * 2 : 0
@@ -1731,6 +2102,46 @@ export default function CharacterSheet() {
         setSentidoTaticoActive(false)
     }
 
+    const handleActivateConhecimentoAplicado = () => {
+        if (conhecimentoAplicadoActive) return
+        if (conhecimentoAplicadoCost > currentEffort) {
+            alert("PE insuficiente para Conhecimento Aplicado.")
+            return
+        }
+        if (conhecimentoAplicadoCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -conhecimentoAplicadoCost)
+        }
+        setConhecimentoAplicadoActive(true)
+    }
+
+    const handleCancelConhecimentoAplicado = () => {
+        if (!conhecimentoAplicadoActive) return
+        if (conhecimentoAplicadoCost > 0) {
+            handleStatusChange("effort_points", "effort_max", conhecimentoAplicadoCost)
+        }
+        setConhecimentoAplicadoActive(false)
+    }
+
+    const handleActivateEcletico = () => {
+        if (ecleticoActive) return
+        if (ecleticoCost > currentEffort) {
+            alert("PE insuficiente para Eclético.")
+            return
+        }
+        if (ecleticoCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -ecleticoCost)
+        }
+        setEcleticoActive(true)
+    }
+
+    const handleCancelEcletico = () => {
+        if (!ecleticoActive) return
+        if (ecleticoCost > 0) {
+            handleStatusChange("effort_points", "effort_max", ecleticoCost)
+        }
+        setEcleticoActive(false)
+    }
+
     const handleActivateDemolishingStrike = () => {
         if (pendingDemolishingStrike) return
         if (demolishingStrikeCost > currentEffort) {
@@ -1782,6 +2193,157 @@ export default function CharacterSheet() {
             handleStatusChange("effort_points", "effort_max", -athleticReadinessCost)
         }
         setOpportunityToast("Habilidade Presteza Atlética ativa, gasto 1 PE")
+    }
+
+    const handleUseTacticalMovement = () => {
+        if (tacticalMovementCost > currentEffort) {
+            alert("PE insuficiente para Movimento Tático.")
+            return
+        }
+        if (tacticalMovementCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -tacticalMovementCost)
+        }
+        setOpportunityToast("Habilidade Movimento Tático ativa, gasto 1 PE")
+    }
+
+    const handleUseQuickHands = () => {
+        if (quickHandsCost > currentEffort) {
+            alert("PE insuficiente para Mãos Rápidas.")
+            return false
+        }
+        if (quickHandsCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -quickHandsCost)
+        }
+        setOpportunityToast("Habilidade Mãos Rápidas ativa, gasto 1 PE")
+        return true
+    }
+
+    const handleUsePensamentoAgil = () => {
+        if (pensamentoAgilCost > currentEffort) {
+            alert("PE insuficiente para Pensamento Ágil.")
+            return
+        }
+        if (pensamentoAgilCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -pensamentoAgilCost)
+        }
+        setOpportunityToast("Habilidade Pensamento Ágil ativa, gasto 2 PE")
+    }
+
+    const handleUseNerd = () => {
+        if (nerdCost > currentEffort) {
+            alert("PE insuficiente para Nerd.")
+            return
+        }
+        if (nerdCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -nerdCost)
+        }
+        handleRollExpertise("atualidades", undefined, 0, {
+            successMin: 20,
+            successLabel: "Nerd"
+        })
+    }
+
+    const handleActivateTrilhaCerta = () => {
+        const nextCost = trilhaCertaBaseCost + trilhaCertaBonusDice
+        if (nextCost > currentEffort) {
+            alert("PE insuficiente para Na Trilha Certa.")
+            return false
+        }
+        const totalCost = (trilhaCertaBonusDice * (trilhaCertaBonusDice + 1)) / 2
+        const nextTotalCost = totalCost + nextCost
+        if (pePerRoundLimit > 0 && nextTotalCost > pePerRoundLimit) {
+            alert("Custo excede o PE por rodada.")
+            return false
+        }
+        if (nextCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -nextCost)
+        }
+        setTrilhaCertaBonusDice((prev) => prev + 1)
+        setOpportunityToast(`Habilidade Na Trilha Certa ativa, gasto ${nextCost} PE`)
+        return true
+    }
+
+    const handleDeactivateTrilhaCerta = () => {
+        setTrilhaCertaBonusDice(0)
+        setIsTrilhaCertaPromptOpen(false)
+    }
+
+    const handleShowTrilhaCertaInfo = () => {
+        setOpportunityToast(
+            "Na Trilha Certa: uso somente nas rolagens de investigação, escutar e observar"
+        )
+    }
+
+    const handleConfirmPrimeiraImpressao = (applyBonus: boolean) => {
+        const pending = pendingPrimeiraImpressao
+        if (!pending) {
+            setIsPrimeiraImpressaoPromptOpen(false)
+            return
+        }
+        setIsPrimeiraImpressaoPromptOpen(false)
+        setPendingPrimeiraImpressao(null)
+        handleRollExpertise(
+            pending.expertiseName,
+            pending.extraBonus,
+            pending.dicePenalty,
+            {
+                ...pending.options,
+                extraDice: applyBonus ? 2 : 0,
+                extraDiceLabel: applyBonus ? "Primeira Impressão" : undefined
+            }
+        )
+    }
+
+    const openPeritoConfig = () => {
+        if (peritoSkillOptions.length === 0) {
+            setOpportunityToast("Perito: nenhuma perícia treinada disponível.")
+            return
+        }
+        setPeritoSkillDraft(peritoSkills)
+        setIsPeritoConfigOpen(true)
+    }
+
+    const togglePeritoSkill = (name: string) => {
+        setPeritoSkillDraft((prev) => {
+            const normalized = normalizeText(name)
+            const hasSkill = prev.some((item) => normalizeText(item) === normalized)
+            if (hasSkill) {
+                return prev.filter((item) => normalizeText(item) !== normalized)
+            }
+            if (prev.length >= 2) return prev
+            return [...prev, name]
+        })
+    }
+
+    const handleSavePeritoSkills = () => {
+        if (peritoSkillDraft.length !== 2) return
+        setPeritoSkills(peritoSkillDraft)
+        localStorage.setItem(peritoStorageKey, JSON.stringify(peritoSkillDraft))
+        setIsPeritoConfigOpen(false)
+    }
+
+    const handleOpenPeritoUse = () => {
+        if (peritoSkills.length < 2) {
+            openPeritoConfig()
+            return
+        }
+        if (pendingPerito) {
+            setOpportunityToast("Perito já está preparado para o próximo teste.")
+            return
+        }
+        setIsPeritoUseOpen(true)
+    }
+
+    const handleActivatePerito = (option: { peCost: number; diceSides: number }) => {
+        if (option.peCost > currentEffort) {
+            alert("PE insuficiente para Perito.")
+            return
+        }
+        if (option.peCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -option.peCost)
+        }
+        setPendingPerito({ peCost: option.peCost, diceSides: option.diceSides })
+        setIsPeritoUseOpen(false)
     }
 
     const handleUseSuppressiveFire = () => {
@@ -1846,8 +2408,16 @@ export default function CharacterSheet() {
         const isDemolishingStrike = normalizeText(ability.name) === "golpe demolidor"
         const isTireless = normalizeText(ability.name) === "incansavel"
         const isAthleticReadiness = normalizeText(ability.name) === "presteza atletica"
+        const isTacticalMovement = normalizeText(ability.name) === "movimento tatico"
+        const isQuickHands = normalizeText(ability.name) === "maos rapidas"
+        const isNerd = normalizeText(ability.name) === "nerd"
+        const isPensamentoAgil = normalizeText(ability.name) === "pensamento agil"
+        const isPerito = normalizeText(ability.name) === "perito"
+        const isNaTrilhaCerta = normalizeText(ability.name) === "na trilha certa"
         const isTriggerHold = normalizeText(ability.name) === "segurar gatilho"
         const isSentidoTatico = normalizeText(ability.name) === "sentido tatico"
+        const isConhecimentoAplicado = normalizeText(ability.name) === "conhecimento aplicado"
+        const isEcletico = normalizeText(ability.name) === "ecletico"
         const isSuppressiveFire = normalizeText(ability.name) === "tiro de cobertura"
         const isClickableAbility =
             isSpecialAttack
@@ -1857,8 +2427,16 @@ export default function CharacterSheet() {
             || isDemolishingStrike
             || isTireless
             || isAthleticReadiness
+            || isTacticalMovement
+            || isQuickHands
+            || isNerd
+            || isPensamentoAgil
+            || isPerito
+            || isNaTrilhaCerta
             || isTriggerHold
             || isSentidoTatico
+            || isConhecimentoAplicado
+            || isEcletico
             || isSuppressiveFire
         const basePeCost = ability.pe_cost ?? 0
         const peCost = isDemolishingStrike
@@ -1867,16 +2445,37 @@ export default function CharacterSheet() {
                 ? Math.max(tirelessCost, basePeCost)
                 : isAthleticReadiness
                     ? Math.max(athleticReadinessCost, basePeCost)
-                    : isTriggerHold
+                    : isTacticalMovement
+                        ? Math.max(tacticalMovementCost, basePeCost)
+                        : isQuickHands
+                            ? Math.max(quickHandsCost, basePeCost)
+                            : isNerd
+                                ? Math.max(nerdCost, basePeCost)
+                                : isPensamentoAgil
+                                    ? Math.max(pensamentoAgilCost, basePeCost)
+                                    : isPerito
+                                        ? Math.max(2, basePeCost)
+                                    : isTriggerHold
                         ? Math.max(triggerHoldBaseCost, basePeCost)
                         : isSentidoTatico
                             ? Math.max(sentidoTaticoCost, basePeCost)
-                            : isSuppressiveFire
-                                ? Math.max(suppressiveFireCost, basePeCost)
-                            : basePeCost
+                            : isConhecimentoAplicado
+                                ? Math.max(conhecimentoAplicadoCost, basePeCost)
+                                : isEcletico
+                                    ? Math.max(ecleticoCost, basePeCost)
+                                    : isSuppressiveFire
+                                        ? Math.max(suppressiveFireCost, basePeCost)
+                                        : basePeCost
         const isAbilityActive = ability.is_active || isDemolishingStrike
         const metaParts = [isAbilityActive ? "Ativa" : "Passiva"]
-        if (isAbilityActive || peCost > 0) {
+        if (isNaTrilhaCerta) {
+            metaParts.push("PE 1 (Cumulativo)")
+        } else if (isPerito) {
+            const peritoCostLabel = availablePeritoOptions
+                .map((option) => option.peCost)
+                .join("/")
+            metaParts.push(peritoCostLabel ? `PE ${peritoCostLabel}` : "PE -")
+        } else if (isAbilityActive || peCost > 0) {
             if (!(isSpecialAttack && peCost === 0)) {
                 metaParts.push(`PE ${peCost}`)
             }
@@ -1899,17 +2498,33 @@ export default function CharacterSheet() {
                                     ? handleActivateDualWield
                                     : isSentidoTatico
                                         ? handleActivateSentidoTatico
-                                    : isDemolishingStrike
-                                        ? handleActivateDemolishingStrike
-                                        : isTireless
-                                            ? handleUseTireless
-                                            : isAthleticReadiness
-                                                ? handleUseAthleticReadiness
-                                                : isTriggerHold
-                                                    ? handleActivateTriggerHold
-                                                    : isSuppressiveFire
-                                                        ? handleUseSuppressiveFire
-                                                    : undefined
+                                    : isConhecimentoAplicado
+                                    ? handleActivateConhecimentoAplicado
+                                        : isEcletico
+                                            ? handleActivateEcletico
+                                            : isDemolishingStrike
+                                                ? handleActivateDemolishingStrike
+                                                : isTireless
+                                                    ? handleUseTireless
+                                                    : isAthleticReadiness
+                                                        ? handleUseAthleticReadiness
+                                                        : isTacticalMovement
+                                                            ? handleUseTacticalMovement
+                                                            : isQuickHands
+                                                                ? handleUseQuickHands
+                                                                    : isNerd
+                                                                        ? handleUseNerd
+                                                                        : isPensamentoAgil
+                                                                            ? handleUsePensamentoAgil
+                                                                            : isPerito
+                                                                                ? handleOpenPeritoUse
+                                                                            : isNaTrilhaCerta
+                                                                                ? handleShowTrilhaCertaInfo
+                                                                            : isTriggerHold
+                                                                ? handleActivateTriggerHold
+                                                                : isSuppressiveFire
+                                                                ? handleUseSuppressiveFire
+                                                                : undefined
                 }
                 onKeyDown={(event) => {
                     if (!isClickableAbility) return
@@ -1925,12 +2540,28 @@ export default function CharacterSheet() {
                             handleActivateDualWield()
                         } else if (isSentidoTatico) {
                             handleActivateSentidoTatico()
+                        } else if (isConhecimentoAplicado) {
+                            handleActivateConhecimentoAplicado()
+                        } else if (isEcletico) {
+                            handleActivateEcletico()
                         } else if (isDemolishingStrike) {
                             handleActivateDemolishingStrike()
                         } else if (isTireless) {
                             handleUseTireless()
                         } else if (isAthleticReadiness) {
                             handleUseAthleticReadiness()
+                        } else if (isTacticalMovement) {
+                            handleUseTacticalMovement()
+                        } else if (isQuickHands) {
+                            handleUseQuickHands()
+                        } else if (isNerd) {
+                            handleUseNerd()
+                        } else if (isPensamentoAgil) {
+                            handleUsePensamentoAgil()
+                        } else if (isPerito) {
+                            handleOpenPeritoUse()
+                        } else if (isNaTrilhaCerta) {
+                            handleShowTrilhaCertaInfo()
                         } else if (isTriggerHold) {
                             handleActivateTriggerHold()
                         } else if (isSuppressiveFire) {
@@ -2356,8 +2987,8 @@ export default function CharacterSheet() {
                                     const items = Object.keys(expertiseAttributeMap)
                                         .filter((name) => expertiseAttributeMap[name] === attr)
                                         .sort((a, b) => {
-                                            const aStats = expertise?.[a]
-                                            const bStats = expertise?.[b]
+                                            const aStats = getEffectiveExpertiseStats(a, expertise?.[a])
+                                            const bStats = getEffectiveExpertiseStats(b, expertise?.[b])
                                             const treinoDiff = (bStats?.treino ?? 0) - (aStats?.treino ?? 0)
                                             if (treinoDiff !== 0) return treinoDiff
                                             const extraDiff = (bStats?.extra ?? 0) - (aStats?.extra ?? 0)
@@ -2376,7 +3007,7 @@ export default function CharacterSheet() {
                                             </div>
                                             <div className="flex flex-col gap-2">
                                                 {items.map((name) => {
-                                                    const stats = expertise?.[name]
+                                                    const stats = getEffectiveExpertiseStats(name, expertise?.[name])
                                                     return (
                                                         <div
                                                             key={name}
@@ -2390,7 +3021,7 @@ export default function CharacterSheet() {
                                                                         sentidoTaticoActive && isResistance
                                                                             ? Number(character.atrib_intellect) || 0
                                                                             : 0
-                                                                    handleRollExpertise(
+                                                                    requestRollExpertise(
                                                                         name,
                                                                         bonusValue > 0
                                                                             ? {
@@ -2510,10 +3141,17 @@ export default function CharacterSheet() {
                                             hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo"
                                                 ? Number(character.atrib_agility) || 0
                                                 : 0
+                                        const ninjaUrbanoDamageBonus =
+                                            hasNinjaUrbano && isTacticalWeapon(weapon) && !isFirearmWeapon(weapon)
+                                                ? 2
+                                                : 0
                                         const tacticalDamageBonus =
                                             hasBalisticaAvancada && isTacticalWeapon(weapon) ? 2 : 0
                                         const damageBonusLabel = formatSignedBonus(
-                                            firearmDamageBonus + specialAttackDamageBonus + tacticalDamageBonus
+                                            firearmDamageBonus
+                                            + specialAttackDamageBonus
+                                            + tacticalDamageBonus
+                                            + ninjaUrbanoDamageBonus
                                         )
                                         const extraDiceLabel = [demolishingStrikeLabel, golpePesadoLabel]
                                             .filter(Boolean)
@@ -3551,6 +4189,190 @@ export default function CharacterSheet() {
                 isRolling={isRolling}
                 onClose={() => setIsRollOpen(false)}
             />
+            <Modal
+                isOpen={isQuickHandsPromptOpen}
+                onClose={() => setIsQuickHandsPromptOpen(false)}
+                className="w-[min(100%-1.5rem,24rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Mãos Rápidas</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsQuickHandsPromptOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Usar Mãos Rápidas?
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setIsQuickHandsPromptOpen(false)}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Agora não
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (handleUseQuickHands()) {
+                                    setIsQuickHandsPromptOpen(false)
+                                }
+                            }}
+                            className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 text-black"
+                        >
+                            Usar (1 PE)
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isPrimeiraImpressaoPromptOpen}
+                onClose={() => handleConfirmPrimeiraImpressao(false)}
+                className="w-[min(100%-1.5rem,24rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Primeira Impressão</div>
+                    <button
+                        type="button"
+                        onClick={() => handleConfirmPrimeiraImpressao(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Usar Primeira Impressão? (+2d20)
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmPrimeiraImpressao(false)}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Agora não
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmPrimeiraImpressao(true)}
+                            className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 text-black"
+                        >
+                            Usar
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isPeritoConfigOpen}
+                onClose={() => setIsPeritoConfigOpen(false)}
+                className="w-[min(100%-1.5rem,30rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Perito</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsPeritoConfigOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Selecione 2 perícias treinadas (exceto Luta e Pontaria).
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-1">
+                        {peritoSkillOptions.map((option) => {
+                            const normalized = normalizeText(option.name)
+                            const isSelected = peritoSkillDraft.some(
+                                (name) => normalizeText(name) === normalized
+                            )
+                            const isDisabled = !isSelected && peritoSkillDraft.length >= 2
+                            return (
+                                <label
+                                    key={option.name}
+                                    className="flex items-center gap-2 rounded border border-zinc-700 bg-zinc-900/70 px-3 py-2 text-sm text-zinc-200"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        className="h-4 w-4"
+                                        checked={isSelected}
+                                        disabled={isDisabled}
+                                        onChange={() => togglePeritoSkill(option.name)}
+                                    />
+                                    <span>{option.label}</span>
+                                </label>
+                            )
+                        })}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                        Selecionadas: {peritoSkillDraft.length}/2
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setIsPeritoConfigOpen(false)}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleSavePeritoSkills}
+                            disabled={peritoSkillDraft.length !== 2}
+                            className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                        >
+                            Salvar
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isPeritoUseOpen}
+                onClose={() => setIsPeritoUseOpen(false)}
+                className="w-[min(100%-1.5rem,26rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Perito</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsPeritoUseOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Perícias: {peritoSkillLabels || "Nenhuma selecionada"}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
+                        {availablePeritoOptions.map((option) => {
+                            const disabled = option.peCost > currentEffort
+                            return (
+                                <button
+                                    key={option.diceSides}
+                                    type="button"
+                                    onClick={() => handleActivatePerito(option)}
+                                    disabled={disabled}
+                                    className="w-full rounded bg-zinc-900/70 border border-zinc-700 px-3 py-2 text-sm text-zinc-200 hover:border-emerald-500/60 disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                    +1d{option.diceSides} (PE {option.peCost})
+                                </button>
+                            )
+                        })}
+                    </div>
+                </div>
+            </Modal>
 
             <ExpertiseEditModal
                 isOpen={isExpertiseEditOpen}
@@ -3572,7 +4394,7 @@ export default function CharacterSheet() {
                 diff={levelUpDiff}
                 onClose={() => setLevelUpDiff(null)}
             />
-            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive) && (
+            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive || conhecimentoAplicadoActive || ecleticoActive || isTrilhaCertaPromptOpen) && (
                 <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
                     {pendingSpecialAttack && (
                         <div className="min-w-[16rem] max-w-88 rounded-lg border border-red-500/40 bg-red-900/30 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
@@ -3635,6 +4457,67 @@ export default function CharacterSheet() {
                                     className="text-xs text-cyan-100 hover:text-white underline underline-offset-2"
                                 >
                                     Desligar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {conhecimentoAplicadoActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-emerald-500/40 bg-emerald-900/30 px-4 py-3 text-emerald-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Conhecimento Aplicado ativo</div>
+                            <div className="text-xs text-emerald-200">
+                                Próxima perícia (exceto Luta/Pontaria) usa Intelecto
+                            </div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelConhecimentoAplicado}
+                                    className="text-xs text-emerald-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {isTrilhaCertaPromptOpen && hasNaTrilhaCerta && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-sky-500/40 bg-sky-900/30 px-4 py-3 text-sky-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Na Trilha Certa</div>
+                            <div className="text-xs text-sky-200">
+                                Bônus atual: {trilhaCertaBonusDice > 0 ? `+${trilhaCertaBonusDice}d20` : "-"}
+                            </div>
+                            <div className="mt-3 flex items-center justify-between gap-3 text-xs">
+                                <button
+                                    type="button"
+                                    onClick={handleDeactivateTrilhaCerta}
+                                    className="text-sky-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Encerrar habilidade
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleActivateTrilhaCerta}
+                                    disabled={!canActivateTrilhaCerta}
+                                    className="text-sky-100 hover:text-white underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {trilhaCertaBonusDice > 0
+                                        ? `Adicionar +1d20 (${trilhaCertaNextCost} PE)`
+                                        : `Ativar +1d20 (${trilhaCertaNextCost} PE)`}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {ecleticoActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-indigo-500/40 bg-indigo-900/30 px-4 py-3 text-indigo-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Eclético ativo</div>
+                            <div className="text-xs text-indigo-200">
+                                Próxima perícia destreinada recebe +5
+                            </div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelEcletico}
+                                    className="text-xs text-indigo-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Cancelar
                                 </button>
                             </div>
                         </div>

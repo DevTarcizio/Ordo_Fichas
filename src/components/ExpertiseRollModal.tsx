@@ -13,6 +13,13 @@ export type ExpertiseRollResult = {
     total: number
     extra_bonus?: number
     extra_label?: string
+    trilha_certa_bonus_dice?: number
+    primeira_impressao_bonus_dice?: number
+    primeira_impressao_label?: string
+    success_min?: number
+    success_label?: string
+    perito_bonus_value?: number
+    perito_bonus_dice?: string
     roll_mode?: "best" | "worst"
 }
 
@@ -86,6 +93,27 @@ export default function ExpertiseRollModal({
                         <div className="text-sm text-zinc-300">
                             D20: <span className="text-white">{result.dice.join(", ") || "-"}</span>
                         </div>
+                        {result.trilha_certa_bonus_dice ? (
+                            <div className="text-xs text-sky-300">
+                                Na Trilha Certa: +{result.trilha_certa_bonus_dice}d20
+                            </div>
+                        ) : null}
+                        {result.primeira_impressao_bonus_dice ? (
+                            <div className="text-xs text-emerald-300">
+                                {result.primeira_impressao_label ?? "Primeira Impressão"}: +{result.primeira_impressao_bonus_dice}d20
+                            </div>
+                        ) : null}
+                        {result.perito_bonus_value ? (
+                            <div className="text-xs text-emerald-300">
+                                Perito: +{result.perito_bonus_value}
+                                {result.perito_bonus_dice ? ` (${result.perito_bonus_dice})` : ""}
+                            </div>
+                        ) : null}
+                        {result.success_min ? (
+                            <div className="text-xs text-amber-300">
+                                {result.success_label ?? "Sucesso"}: DT = {result.success_min}
+                            </div>
+                        ) : null}
                         {result.extra_bonus ? (
                             <div className="text-xs text-emerald-300">
                                 {result.extra_label ?? "Bônus extra"}: +{result.extra_bonus}
