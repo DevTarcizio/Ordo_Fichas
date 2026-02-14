@@ -3,9 +3,16 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
-import { Eye, EyeOff, Info, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ChevronDown, Eye, EyeOff, Info, Pencil, Plus, Trash2, X } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
-import type { AbilitySummary, CharacterDetails, OriginSummary, ProficiencySummary, WeaponSummary } from "../types/character"
+import type {
+    AbilitySummary,
+    CharacterDetails,
+    OriginSummary,
+    ProficiencySummary,
+    RitualSummary,
+    WeaponSummary
+} from "../types/character"
 import CharacterEditModal from "../components/CharacterEditModal"
 import type { EditForm } from "../components/CharacterEditModal"
 import StatusEditModal from "../components/StatusEditModal"
@@ -57,9 +64,27 @@ type PendingSpecialAttack = {
     label: string
 }
 
+type PendingRitualOccultismTest = {
+    ritualName: string
+    ritualVariant: "padrao" | "discente" | "verdadeiro"
+    peCost: number
+    dt: number
+}
+
 type SpecialAttackEffect = {
     options: SpecialAttackOption[]
     appliesTo: SpecialAttackTarget[]
+}
+
+type RitualCasterCircle = {
+    nexMin: number
+    circle: number
+}
+
+type RitualCasterEffect = {
+    circles: RitualCasterCircle[]
+    startingCount: number
+    learnOnNexCount: number
 }
 
 const UNARMED_WEAPON_ID = -1
@@ -131,6 +156,77 @@ const formatSignedBonus = (value: number) => {
     return value > 0 ? `+${value}` : String(value)
 }
 
+const mergeExtraBonus = (
+    base?: { value: number; label?: string } | null,
+    extra?: { value: number; label?: string } | null
+) => {
+    if (!extra) return base ?? undefined
+    if (!base) return extra ?? undefined
+    return {
+        value: base.value + extra.value,
+        label: [base.label, extra.label].filter(Boolean).join(" + ")
+    }
+}
+
+const parseRitualCasterEffect = (
+    effect: Record<string, unknown> | null | undefined
+): RitualCasterEffect | null => {
+    if (!effect || typeof effect !== "object") return null
+    const rawType = (effect as Record<string, unknown>).type
+    if (rawType !== "ritual_caster") return null
+    const effectRecord = effect as Record<string, unknown>
+    const rawCircles = Array.isArray(effectRecord["circles"])
+        ? effectRecord["circles"]
+        : []
+    const circles = rawCircles
+        .map((item) => {
+            if (!item || typeof item !== "object") return null
+            const entry = item as Record<string, unknown>
+            const nexMin = toFiniteNumber(entry["nex_min"])
+            const circle = toFiniteNumber(entry["circle"])
+            if (nexMin === null || circle === null) return null
+            return { nexMin, circle }
+        })
+        .filter((item): item is RitualCasterCircle => item !== null)
+        .sort((a, b) => a.nexMin - b.nexMin || a.circle - b.circle)
+    const startingRituals = effectRecord["starting_rituals"]
+    const startingCount =
+        startingRituals && typeof startingRituals === "object"
+            ? toFiniteNumber((startingRituals as Record<string, unknown>)["count"]) ?? 0
+            : 0
+    const learnOnNex = effectRecord["learn_on_nex"]
+    const learnOnNexCount =
+        learnOnNex && typeof learnOnNex === "object"
+            ? toFiniteNumber((learnOnNex as Record<string, unknown>)["count"]) ?? 0
+            : 0
+    return {
+        circles,
+        startingCount,
+        learnOnNexCount
+    }
+}
+
+const getMaxRitualCircle = (circles: RitualCasterCircle[], nexTotal: number) => {
+    if (circles.length === 0) return 0
+    const nexValue = Math.max(0, nexTotal)
+    let maxCircle = 0
+    circles.forEach((entry) => {
+        if (nexValue >= entry.nexMin) {
+            maxCircle = Math.max(maxCircle, entry.circle)
+        }
+    })
+    return maxCircle
+}
+
+const applyRitualCostReduction = (
+    value: number | null | undefined,
+    reduction: number
+) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return value
+    if (!reduction) return value
+    return Math.max(0, value - reduction)
+}
+
 const resistanceExpertiseSet = new Set(["fortitude", "reflexos", "vontade"])
 const trilhaCertaExpertiseSet = new Set(["investigacao", "escutar", "observar"])
 const primeiraImpressaoExpertiseSet = new Set([
@@ -139,6 +235,8 @@ const primeiraImpressaoExpertiseSet = new Set([
     "intimidacao",
     "intuicao"
 ])
+const envoltoMisterioExpertiseSet = new Set(["enganacao", "intimidacao"])
+const identificacaoParanormalExpertiseSet = new Set(["ocultismo"])
 
 const isTacticalWeapon = (weapon: WeaponSummary) => {
     const proficiency = normalizeText(weapon.proficiency_required ?? "")
@@ -200,6 +298,36 @@ const normalizeText = (value: string) =>
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
+
+const isRitualCasterAbility = (ability?: AbilitySummary | null) => {
+    if (!ability) return false
+    const effectType =
+        ability.effect && typeof ability.effect === "object"
+            ? (ability.effect as Record<string, unknown>).type
+            : null
+    return effectType === "ritual_caster"
+        || normalizeText(ability.name) === "escolhido pelo outro lado"
+}
+
+const isIdentificacaoParanormalName = (value: string) => {
+    const normalized = normalizeText(value)
+    return normalized === "identificacao paranormal" || normalized === "indentificacao paranormal"
+}
+
+const isMestreEmElementoName = (value: string) => {
+    const normalized = normalizeText(value)
+    return normalized === "mestre em elemento"
+}
+
+const isRitualPrediletoName = (value: string) => {
+    const normalized = normalizeText(value)
+    return normalized === "ritual predileto"
+}
+
+const isTatuagemRitualisticaName = (value: string) => {
+    const normalized = normalizeText(value)
+    return normalized === "tatuagem ritualistica"
+}
 
 const toAbilityJson = (value: unknown) => {
     if (value === null || value === undefined) return ""
@@ -274,6 +402,328 @@ const weaponFormDefaults = {
     weapon_type: ""
 }
 
+const expertiseDescriptionMap: Partial<Record<string, string>> = {
+    acrobacias:
+        "Você consegue fazer proezas acrobáticas.\n\n" +
+        "## Amortecer Queda (Veterano, DT 15)\n" +
+        "Quando cai, você pode gastar uma reação e fazer um teste de Acrobacia para reduzir o dano. Se passar, reduz o dano da queda em 1d6, mais 1d6 para cada 5 pontos pelos quais o resultado do teste exceder a DT. Se reduzir o dano a zero, você cai de pé.\n\n" +
+        "## Equilíbrio\n" +
+        "Se estiver andando por superfícies precárias, você precisa fazer testes de Acrobacia para não cair. Cada ação de movimento exige um teste. Se passar, você avança metade do seu deslocamento. Se falhar, não avança. Se falhar por 5 ou mais, cai. A DT é 10 para piso escorregadio, 15 para uma superfície estreita (como o topo de um muro) e 20 para uma superfície muito estreita (como uma corda esticada). Você pode sofrer -O no teste para avançar seu deslocamento total. Quando está se equilibrando você fica desprevenido e, se sofrer dano, deve fazer um novo teste de Acrobacia; se falhar, cai.\n\n" +
+        "## Escapar\n" +
+        "Você pode escapar de amarras. A DT é igual ao resultado do teste de Agilidade de quem o amarrou +10 se você estiver preso por cordas, ou 30 se você estiver preso por algemas. Este uso gasta uma ação completa.\n\n" +
+        "## Levantar-se Rapidamente (Treinado, DT 20)\n" +
+        "Se estiver caído, você pode fazer um teste de Acrobacia para ficar de pé. Você precisa ter uma ação de movimento disponível. Se passar no teste, se levanta como uma ação livre. Se falhar, gasta sua ação de movimento, mas continua caído.\n\n" +
+        "## Passar por Espaço Apertado (Treinado, DT 25)\n" +
+        "Você pode se espremer por lugares estreitos, por onde apenas sua cabeça normalmente passaria. Você gasta uma ação completa e avança metade do deslocamento.\n\n" +
+        "## Passar por Inimigo\n" +
+        "Você pode atravessar um espaço ocupado por um inimigo como parte de seu movimento. Faça um teste de Acrobacia oposto ao teste de Acrobacia, Iniciativa ou Luta do oponente (o que for melhor). Se você passar, atravessa o espaço; se falhar, não atravessa e sua ação de movimento termina. Um espaço ocupado por um inimigo conta como terreno difícil.",
+    adestramento:
+        "Você sabe lidar com animais.\n\n" +
+        "## Acalmar Animal (DT 25)\n" +
+        "Você acalma um animal nervoso ou agressivo. Isso permite a você controlar um touro furioso ou convencer um cão de guarda a não atacá-lo. Este uso gasta uma ação completa.\n\n" +
+        "## Cavalgar\n" +
+        "Você pode cavalgar em animais montáveis. Montar exige uma ação de movimento, mas você pode montar como uma ação livre com um teste de Adestramento contra DT 20 (porém, se falhar por 5 ou mais, cai no chão).\n" +
+        "Andar em terreno plano não exige testes, mas passar por obstáculos ou andar em terreno acidentado, sim. A DT é 15 para obstáculos pequenos ou terreno ruim (estrada esburacada) e 20 para obstáculos grandes ou terreno muito ruim (floresta à noite). Se você falhar, cai da montaria e sofre 1d6 pontos de dano. Cavalgar é parte de seu movimento e não exige uma ação.\n" +
+        "Se estiver a cavalo, você pode galopar. Gaste uma ação completa e faça um teste de Adestramento. Você avança um número de quadrados de 1,5m igual ao seu deslocamento (modificado pela montaria) mais o resultado do teste. Você só pode galopar em linha reta e não pode galopar em terreno difícil.\n\n" +
+        "## Manejar Animal (DT 15)\n" +
+        "Você faz um animal realizar uma tarefa para a qual foi treinado. Isso permite usar Adestramento como Pilotagem para veículos de tração animal, como carroças. Este uso gasta uma ação de movimento.",
+    artes:
+        "Você sabe se expressar com diversas formas de arte, como música, dança, escrita, pintura, atuação e outras.\n\n" +
+        "## Impressionar\n" +
+        "Faça um teste de Artes oposto pelo teste de Vontade de quem você está tentando impressionar. Se você passar, recebe +2 em testes de perícia originalmente baseadas em Presença contra essa pessoa na mesma cena. Se falhar, sofre -2 nesses testes, e não pode tentar de novo na mesma cena. Se estiver tentando impressionar mais de uma pessoa, o mestre faz apenas um teste pela plateia toda, usando o melhor bônus. Este uso leva de alguns minutos (música ou dança) até algumas horas (apresentação de teatro).",
+    atletismo:
+        "Você pode realizar façanhas atléticas.\n\n" +
+        "## Corrida\n" +
+        "Gaste uma ação completa e faça um teste de Atletismo. Você avança um número de quadrados de 1,5m igual ao seu deslocamento mais o resultado do teste. Por exemplo, se você tem deslocamento 9m (6 quadrados) e tira 15 no teste, avança 21 quadrados. Você só pode correr em linha reta e não pode correr em terreno difícil. Você pode correr por um número de rodadas igual ao seu Vigor. Após isso, deve fazer um teste de Fortitude por rodada (DT 5 + 5 por teste anterior). Se falhar, fica fatigado.\n\n" +
+        "## Escalar\n" +
+        "Gaste uma ação de movimento e faça um teste de Atletismo. Se passar, você avança metade do seu deslocamento. Se falhar, não avança. Se falhar por 5 ou mais, você cai. A DT é 10 para superfícies com apoios para os pés e mãos (como um barranco com raízes), 15 para um portão ou árvore, 20 para um muro ou parede com reentrâncias e 25 para um muro ou parede liso (como um prédio). Você pode sofrer -1d20 no teste para avançar seu deslocamento total. Quando está escalando você fica desprevenido e, se sofrer dano, deve fazer um novo teste de Atletismo; se falhar, você cai. Se um ser adjacente a você estiver escalando e cair, você pode tentar pegá-lo. Faça um teste de Atletismo contra a DT da superfície +5. Se passar, você segura o ser. Se falhar por 5 ou mais, você também cai!\n\n" +
+        "## Natação\n" +
+        "Se estiver na água, você precisa gastar uma ação de movimento e fazer um teste de Atletismo por rodada para não afundar. A DT é 10 para água calma, 15 para agitada e 20 ou mais para tempestuosa. Se passar, você pode avançar metade de seu deslocamento. Se falhar, consegue boiar, mas não avançar. Se falhar por 5 ou mais, você afunda. Se quiser avançar mais, você pode gastar uma segunda ação de movimento na mesma rodada para outro teste de Atletismo. Se você estiver submerso (seja por ter falhado no teste de Atletismo, seja por ter mergulhado de propósito), deve prender a respiração. Você pode prender a respiração por um número de rodadas igual ao seu Vigor. Após isso, deve fazer um teste de Fortitude por rodada (DT 5 + 5 por teste anterior). Se falhar, se afoga (é reduzido a 0 pontos de vida) e fica morrendo (veja o Capítulo 4). Você sofre penalidade de carga em testes de natação.\n\n" +
+        "## Saltar\n" +
+        "Você pode pular sobre buracos ou obstáculos ou alcançar algo elevado. Para um salto longo, a DT é 5 por quadrado de 1,5m (DT 10 para 3m, 15 para 4,5m, 20 para 6m e assim por diante). Para um salto em altura, a DT é 15 por quadrado de 1,5m (30 para 3m). Você deve ter pelo menos 6m para correr e pegar impulso (sem esse espaço, a DT aumenta em +5). Saltar é parte de seu movimento e não exige uma ação."
+        ,
+    atualidades:
+        "Você é um conhecedor de assuntos gerais, como política, esporte e entretenimento, e pode responder dúvidas relativas a esses assuntos. A DT é 15 para informações comuns, como o nome do autor de um livro, 20 para informações específicas, como a história do fundador de uma empresa, e 25 para informações quase desconhecidas, como uma lenda urbana já esquecida."
+        ,
+    ciencia:
+        "Você estudou diversos campos científicos, como matemática, física, química e biologia, e pode responder dúvidas relativas a esses assuntos. Questões simples, como a composição química de uma substância conhecida, não exigem teste. Questões complexas, como detalhes sobre o funcionamento de um procedimento científico específico, exigem um teste contra DT 20. Por fim, questões envolvendo campos experimentais, como avaliar a capacidade de proteção de uma liga metálica recém-criada, exigem um teste contra DT 30."
+        ,
+    crime:
+        "Você sabe exercer atividades ilícitas.\n\n" +
+        "## Arrombar\n" +
+        "Você abre uma fechadura trancada. A DT é 20 para fechaduras comuns (porta de um apartamento), 25 para fechaduras reforçadas (porta de uma loja) e 30 para fechaduras avançadas (cofre de um banco). Este uso gasta uma ação completa.\n\n" +
+        "## Furto (DT 20)\n" +
+        "Você pega um objeto de outra pessoa (ou planta um objeto nas posses dela). Gaste uma ação padrão e faça um teste de Crime. Se passar, você pega (ou coloca) o que queria. A vítima tem direito a um teste de Percepção (DT igual ao resultado de seu teste de Crime). Se passar, ela percebe sua tentativa, tenha você conseguido ou não.\n\n" +
+        "## Ocultar\n" +
+        "Você esconde um objeto em você mesmo. Gaste uma ação padrão e faça um teste de Crime oposto pelo teste de Percepção de qualquer um que possa vê-lo. Se uma pessoa revistar você, recebe +10 no teste de Percepção.\n\n" +
+        "## Sabotar (Veterano)\n" +
+        "Você desabilita um dispositivo. Uma ação simples, como desativar um alarme, tem DT 20. Uma ação complexa, como sabotar uma pistola para que exploda quando disparada, tem DT 30. Se você falhar por 5 ou mais, algo sai errado (o alarme dispara, você acha que a arma está sabotada, mas na verdade ainda funciona…). Este uso gasta 1d4+1 ações completas. Você pode sofrer uma penalidade de -O em seu teste para fazê-lo como uma ação completa.\n\n" +
+        "Os usos arrombar e sabotar exigem um kit. Sem ele, você sofre -5 no teste.",
+    diplomacia:
+        "Você convence pessoas com lábia e argumentação.\n\n" +
+        "## Acalmar (Treinado, DT 20)\n" +
+        "Você estabiliza um personagem adjacente que esteja enlouquecendo, fazendo com que ele fique com Sanidade 1. A DT aumenta em +5 para cada vez que ele tiver sido acalmado na cena. Este uso gasta uma ação padrão.\n\n" +
+        "## Mudar Atitude\n" +
+        "Você muda a categoria de atitude de um NPC em relação a você ou a outra pessoa (veja a página 45 do livro base). Faça um teste de Diplomacia oposto pelo teste de Vontade do alvo. Se você passar, muda a atitude dele em uma categoria para cima ou para baixo, à sua escolha. Se passar por 10 ou mais, muda a atitude em até duas categorias. Se falhar por 5 ou mais, a atitude do alvo muda uma categoria na direção oposta. Este uso gasta um minuto. Você pode sofrer -2d20 no teste para fazê-lo como uma ação completa (para evitar uma briga, por exemplo). Você só pode mudar a atitude de uma mesma pessoa uma vez por dia.\n\n" +
+        "## Persuasão (DT 20)\n" +
+        "Você convence uma pessoa a fazer alguma coisa, como responder a uma pergunta ou prestar um favor. Se essa coisa for custosa (como emprestar um carro) você sofre -5 em seu teste. Se for perigosa (como cometer um crime) você sofre -10 ou falha automaticamente. De acordo com o mestre, seu teste pode ser oposto ao teste de Vontade da pessoa. Este uso gasta um minuto ou mais, de acordo com o mestre.",
+    enganacao:
+        "Você manipula pessoas com blefes e trapaças.\n\n" +
+        "## Disfarce (Treinado)\n" +
+        "Você muda sua aparência ou a de outra pessoa. Faça um teste de Enganação oposto pelo teste de Percepção de quem prestar atenção no disfarçado. Se você passar, a pessoa acredita no disfarce; caso contrário, percebe que há algo errado. Se o disfarce é de uma pessoa específica, aqueles que conhecem essa pessoa recebem +10 no teste de Percepção. Um disfarce exige pelo menos dez minutos e um kit. Sem ele, você sofre -5 no teste.\n\n" +
+        "## Falsificação (Veterano)\n" +
+        "Você falsifica um documento. Faça um teste de Enganação oposto pelo teste de Percepção de quem examinar o documento. Se você passar, a pessoa acredita que ele é válido; caso contrário, percebe que é falso. Se o documento é muito complexo, ou inclui uma assinatura ou carimbo específico, você sofre -2d20 no teste.\n\n" +
+        "## Fintar (Treinado)\n" +
+        "Você pode gastar uma ação padrão e fazer um teste de Enganação oposto a um teste de Reflexos de um ser em alcance curto. Se você passar, ele fica desprevenido contra seu próximo ataque, se realizado até o fim de seu próximo turno.\n\n" +
+        "## Insinuação (DT 20)\n" +
+        "Você fala algo para alguém sem que outras pessoas entendam do que você está falando. Se você passar, o receptor entende sua mensagem. Se falhar por 5 ou mais, entende algo diferente do que você queria. Outras pessoas podem fazer um teste de Intuição oposto ao seu teste de Enganação. Se passarem, entendem o que você está dizendo.\n\n" +
+        "## Intriga (DT 20)\n" +
+        "Você espalha uma fofoca. Por exemplo, pode dizer que o dono do bar está aguando a cerveja para enfurecer o povo contra ele. Intrigas muito improváveis (convencer o povo que o delegado é um ET que está abduzindo as pessoas) têm DT 30. Este uso exige pelo menos um dia, mas pode levar mais tempo, de acordo com o mestre. Uma pessoa pode investigar a fonte da fofoca e chegar até você. Isso exige um teste de Investigação por parte dela, com DT igual ao resultado do seu teste para a intriga.\n\n" +
+        "## Mentir\n" +
+        "Você faz uma pessoa acreditar em algo que não é verdade. Seu teste é oposto pelo teste de Intuição da vítima. Mentiras muito implausíveis impõem uma penalidade de -2d20 em seu teste (\"Por que estou com o crachá do chefe de segurança? Ora, porque ele deixou cair e estou indo devolver!\").",
+    fortitude:
+        "Você usa esta perícia para testes de resistência contra efeitos que exigem vitalidade, como doenças e venenos. A DT é determinada pelo efeito. Você também usa Fortitude para manter seu fôlego quando está correndo ou sem respirar. A DT é 5 +5 por teste anterior (veja a perícia Atletismo para mais detalhes)"
+        ,
+    furtividade:
+        "Você sabe ser discreto e sorrateiro.\n\n" +
+        "## Esconder-se\n" +
+        "Faça um teste de Furtividade oposto pelos testes de Percepção de qualquer um que possa notá-lo. Todos que falharem não conseguem percebê-lo (você tem camuflagem total contra eles). Esconder-se é uma ação livre que você só pode fazer no final do seu turno e apenas se terminar seu turno em um lugar onde seja possível se esconder (atrás de uma porta, num quarto escuro, numa mata densa, no meio de uma multidão…). Se tiver se movido durante o turno, você sofre -1d20 no teste (você pode se mover à metade do deslocamento normal para não sofrer essa penalidade). Se tiver atacado ou feito outra ação muito chamativa, sofre -3d20.\n\n" +
+        "## Seguir\n" +
+        "Faça um teste de Furtividade oposto ao teste de Percepção da pessoa sendo seguida. Você sofre -5 se estiver em um lugar sem esconderijos ou sem movimento, como um descampado ou rua deserta. A vítima recebe +5 em seu teste de Percepção se estiver tomando precauções para não ser seguida (como olhar para trás de vez em quando). Se você passar, segue a pessoa até ela chegar ao seu destino. Se falhar, a pessoa o percebe na metade do caminho."
+        ,
+    iniciativa:
+        "Esta perícia determina sua velocidade de reação. Quando uma cena de ação começa, cada ser envolvido faz um teste de Iniciativa. Eles então agem em ordem decrescente dos resultados."
+        ,
+    intimidacao:
+        "Você pode assustar ou coagir outras pessoas. Todos os usos de Intimidação são efeitos de medo.\n\n" +
+        "## Assustar (Treinado)\n" +
+        "Gaste uma ação padrão e faça um teste de Intimidação oposto pelo teste de Vontade de uma pessoa em alcance curto. Se você passar, ela fica abalada pelo resto da cena (não cumulativo). Se você passar por 10 ou mais, ela fica apavorado por uma rodada e então abalada pelo resto da cena.\n\n" +
+        "## Coagir\n" +
+        "Faça um teste de Intimidação oposto pelo teste de Vontade de uma pessoa adjacente. Se você passar, ela obedece uma ordem sua (como fazer uma pequena tarefa, deixar que você passe por um lugar que ele estava protegendo etc.). Se você mandar a pessoa fazer algo perigoso ou que vá contra a natureza dela, ela recebe +5 no teste ou passa automaticamente. Este uso gasta um minuto ou mais, de acordo com o mestre, e deixa a pessoa hostil contra você."
+        ,
+    intuicao:
+        "Esta perícia mede sua empatia e “sexto sentido”.\n\n" +
+        "## Perceber Mentira\n" +
+        "Você descobre se alguém está mentindo (veja a perícia Enganação).\n\n" +
+        "## Pressentimento (Treinado, DT 20)\n" +
+        "Você analisa uma pessoa, para ter uma ideia de sua índole ou caráter, ou uma situação, para perceber qualquer fato estranho (por exemplo, se os habitantes de uma cidadezinha estão agindo de forma esquisita). Este uso apenas indica se há algo anormal; para descobrir a causa, veja a perícia Investigação."
+        ,
+    luta:
+        "Você usa Luta para fazer ataques corpo a corpo. A DT é a Defesa do alvo. Se você acertar, causa dano de acordo com a arma utilizada."
+        ,
+    medicina:
+        "Você sabe tratar ferimentos, doenças e venenos.\n\n" +
+        "## Primeiros Socorros (DT 20)\n" +
+        "Um personagem adjacente que esteja morrendo e inconsciente perde essas condições e fica com 1 PV. A DT aumenta em +5 para cada vez que ele tiver sido estabilizado na cena. Este uso gasta uma ação padrão.\n\n" +
+        "## Cuidados Prolongados (Veterano, DT 20)\n" +
+        "Durante uma cena de interlúdio, você pode gastar uma de suas ações para tratar até um ser por ponto de Intelecto. Se passar, eles recuperam o dobro dos PV pela ação dormir neste interlúdio.\n\n" +
+        "## Necropsia (Treinado, DT 20)\n" +
+        "Você examina um cadáver para determinar a causa e o momento aproximado da morte. Causas raras ou extraordinárias, como um veneno exótico ou uma maldição, possuem DT +10. Este uso leva dez minutos.\n\n" +
+        "## Tratamento (Treinado)\n" +
+        "Você ajuda a vítima de uma doença ou veneno com efeito contínuo. Gaste uma ação completa e faça um teste contra a DT da doença ou veneno. Se você passar, o paciente recebe +5 em seu próximo teste de Fortitude contra esse efeito.\n\n" +
+        "Esta perícia exige um kit. Sem ele, você sofre -5 no teste. Você pode usar a perícia Medicina em si mesmo, mas sofre -1d20 no teste."
+        ,
+    ocultismo:
+        "Você estudou o paranormal.\n\n" +
+        "## Identificar Criatura\n" +
+        "Você analisa uma criatura paranormal que possa ver. A DT do teste é igual à DT para resistir à Presença Perturbadora da criatura. Se você passar, descobre uma característica da criatura, como um poder ou vulnerabilidade. Para cada 5 pontos pelos quais o resultado do teste superar a DT, você descobre outra característica. Se falhar por 5 ou mais, tira uma conclusão errada (por exemplo, acredita que uma criatura tem vulnerabilidade a Morte, quando na verdade tem vulnerabilidade a Energia). Este uso gasta uma ação completa.\n\n" +
+        "## Identificar Item Amaldiçoado (DT 20)\n" +
+        "Você pode gastar uma ação de interlúdio para estudar um item amaldiçoado e identificar seus poderes ou qual ritual o objeto contém. Você pode sofrer -2d20 no teste para fazê-lo como uma ação completa.\n\n" +
+        "## Identificar Ritual (DT 10 +5 por círculo do ritual)\n" +
+        "Quando alguém lança um ritual, você pode descobrir qual é observando seus gestos, palavras e componentes. Este uso é uma reação.\n\n" +
+        "## Informação\n" +
+        "Você responde dúvidas relativas ao Outro Lado, objetos amaldiçoados, fenômenos paranormais, runas, profecias etc. Questões simples não exigem teste. Questões complexas exigem um teste contra DT 20. Por fim, mistérios e enigmas exigem um teste contra DT 30."
+        ,
+    observar:
+        "Você vê coisas discretas ou escondidas. A DT varia de 15, para coisas difíceis de serem vistas (um livro específico em uma estante) a 30, para coisas quase invisíveis (uma gota de sangue em uma folha no meio de uma floresta à noite). Para pessoas ou coisas escondidas, a DT é o resultado do teste de Furtividade ou Crime feito para esconder a pessoa ou ocultar o item. Você também pode ler lábios (DT 20)."
+        ,
+    escutar:
+        "Você escuta barulhos sutis. Uma conversa casual próxima tem DT 0 — ou seja, a menos que exista alguma penalidade, você passa automaticamente. Ouvir pessoas sussurrando tem DT 15. Ouvir do outro lado de uma porta aumenta a DT em +5. Você pode fazer testes de Percepção para ouvir mesmo que esteja dormindo, mas sofre -2d20 no teste; um sucesso faz você acordar. Perceber seres que não possam ser vistos tem DT 20, ou +10 no teste de Furtividade do ser, o que for maior. Mesmo que você passe no teste, ainda sofre penalidades normais por lutar sem ver o inimigo."
+        ,
+    pilotagem:
+        "Você sabe operar veículos terrestres e aquáticos, como motos, carros e lanchas. Pilotar um veículo gasta uma ação de movimento por turno. Situações comuns (dirigir em uma estrada, velejar em clima tranquilo) não exigem teste. Situações ruins (dirigir em uma estrada de chão e sem iluminação, velejar em chuva ou ventania) exigem um teste por turno contra DT 15. Situações terríveis (dirigir em terreno acidentado, velejar durante uma tempestade) exigem um teste por turno contra DT 25. Se você possuir grau de treinamento veterano nesta perícia, pode pilotar veículos aéreos, como aviões e helicópteros."
+        ,
+    pontaria:
+        "Você usa Pontaria para fazer ataques à distância. A DT é a Defesa do alvo. Se você acertar, causa dano de acordo com a arma utilizada."
+        ,
+    profissao:
+        "Você sabe exercer uma profissão específica, como advogado, engenheiro, jornalista ou publicitário. Converse com o mestre para definir os detalhes de sua profissão e que tipos de testes você pode fazer com ela. Por exemplo, um advogado pode fazer um teste de Profissão para argumentar com a polícia, enquanto um administrador pode usar esta perícia para investigar os documentos de uma corporação. Um personagem treinado nesta perícia possui seus próprios rendimentos ou, caso não trabalhe mais, uma reserva de capital. Isso permite que você comece cada missão com um item adicional, além daqueles fornecidos pela Ordem. O item é de categoria I se você for treinado, de categoria II se você for veterano e de categoria III se você for expert."
+        ,
+    reflexos:
+        "Você usa esta perícia para testes de resistência contra efeitos que exigem reação rápida, como armadilhas e explosões. A DT é determina pelo efeito. Você também usa Reflexos para evitar fintas (veja Enganação)."
+        ,
+    religiao:
+        "Você possui conhecimento sobre teologia e as diversas religiões do mundo.\n\n" +
+        "## Acalmar (DT 20)\n" +
+        "Você pode usar Religião como Diplomacia para acalmar um personagem que esteja enlouquecendo.\n\n" +
+        "## Informação\n" +
+        "Você pode responder dúvidas relativas a mitos, profecias, relíquias sagradas etc. A DT é 10 para questões simples, 20 para questões complexas e 30 para mistérios e enigmas.\n\n" +
+        "## Rito (Veterano, DT 20)\n" +
+        "Você realiza uma cerimônia religiosa (batizado, casamento, funeral…)."
+        ,
+    sobrevivencia:
+        "Você pode se guiar em regiões selvagens e evitar perigos da natureza.\n\n" +
+        "## Acampamento (Treinado)\n" +
+        "Você pode conseguir abrigo e alimento nos ermos, caçando, pescando, colhendo frutos etc. A DT depende do tipo de terreno: 15 para campo aberto, 20 para mata fechada e 25 para regiões extremas, como desertos, pântanos ou montanhas. Regiões especialmente áridas ou estéreis e clima ruim (neve, tempestade etc.) impõem uma penalidade de -5 (cumulativa). Se passar, você e seu grupo podem usar as ações de interlúdio alimentar-se e dormir mesmo estando ao relento.\n\n" +
+        "## Identificar Animal (Treinado, DT 20)\n" +
+        "Com uma ação completa, você pode identificar um animal exótico. Veja a perícia Ocultismo.\n\n" +
+        "## Orientar-se\n" +
+        "Um personagem viajando em regiões selvagens precisa fazer um teste de Sobrevivência por dia para avançar. A DT depende do tipo de terreno (veja acima). Se passar, você avança seu deslocamento normal. Se falhar, avança metade. Se falhar por 5 ou mais, se perde e não avança pelo dia inteiro. Num grupo, um personagem deve ser escolhido como guia. Personagens treinados em Sobrevivência podem fazer testes para ajudá-lo. Entretanto, se mais de um personagem quiser fazer o teste por si só, todos deverão rolar os dados em segredo. Os jogadores devem decidir qual guia seguir antes de verem o resultado!\n\n" +
+        "## Rastrear (Treinado)\n" +
+        "Você pode identificar e seguir rastros. A DT varia: 15 para rastrear um grupo grande, ou um único ser em solo macio, como lama ou neve; 20 para um ser em solo comum (grama, terra); 25 para um ser em solo duro (estrada, piso de interiores). Visibilidade precária ou clima ruim (noite, chuva, neblina) impõem -O no teste. Você precisa fazer um teste por dia de perseguição. Enquanto rastreia, seu deslocamento é reduzido à metade. Se falhar, pode tentar novamente gastando mais um dia. Porém, a cada dia desde a criação dos rastros, a DT aumenta em +1."
+        ,
+    tatica:
+        "Você recebeu educação militar.\n\n" +
+        "## Analisar Terreno (DT 20)\n" +
+        "Com uma ação de movimento, você pode observar o campo de batalha. Se passar, descobre uma vantagem, como cobertura, camuflagem ou terreno elevado, se houver.\n\n" +
+        "## Plano de Ação (Veterano, DT 20)\n" +
+        "Com uma ação padrão, você orienta um aliado em alcance médio. Se passar, fornece +5 na Iniciativa dele. Se isso fizer com que um aliado que ainda não tenha agido nesta rodada fique com uma Iniciativa maior do que a sua, ele age imediatamente após seu turno. Nas próximas rodadas, ele age de acordo com a nova ordem."
+        ,
+    tecnologia:
+        "Você possui conhecimentos avançados de eletrônica e informática. Usos cotidianos, como mexer em um computador ou celular, não exigem treinamento nesta perícia ou testes. Esta perícia serve para usos avançados, como reprogramar um sistema de vigilância ou invadir um servidor seguro.\n\n" +
+        "## Falsificação (Veterano)\n" +
+        "Como o uso de Enganação, mas apenas para documentos eletrônicos.\n\n" +
+        "## Hackear\n" +
+        "Você invade um computador protegido. A DT é 15 para computadores pessoais, 20 para redes profissionais e 25 para grandes servidores corporativos, governamentais ou militares. Este uso gasta 1d4+1 ações completas. Você pode sofrer uma penalidade de -O em seu teste para fazê-lo como uma ação completa. Se você falhar no teste, não pode tentar novamente até ter alguma informação nova que o ajude na invasão, como um nome de usuário ou senha. Se falhar por 5 ou mais, pode ser rastreado pelos administradores do sistema que tentou invadir. Uma vez que invada o sistema, você pode fazer o que veio fazer. Para procurar uma informação específica, veja o uso localizar arquivo, abaixo. Outras ações, como alterar ou deletar arquivos, corromper ou desativar aplicativos ou bloquear o acesso de outros usuários, podem exigir novos testes de Tecnologia, a critério do mestre.\n\n" +
+        "## Localizar Arquivo\n" +
+        "Você procura um arquivo específico em um computador ou rede que possa acessar (se você não tiver acesso ao sistema, precisará primeiro invadi-lo; veja o uso hackear, acima). O tempo exigido e a DT do teste variam de acordo com o tamanho do sistema no qual você está pesquisando: uma ação completa e DT 15 para um computador pessoal, 1d4+1 ações completas e DT 20 para uma rede pequena e 1d6+2 ações completas e DT 25 para uma rede corporativa ou governamental. Este uso se refere apenas a localizar arquivos em sistemas privados que você não conhece. Para procurar informações públicas, na internet, use a perícia Investigação.\n\n" +
+        "## Operar Dispositivo\n" +
+        "Você opera um dispositivo eletrônico complexo. Isso permite que você acesse câmeras remotamente, destrave fechaduras eletrônicas, ative ou desative alarmes etc. A DT é 15 para aparelhos comuns, 20 para equipamento profissional e 25 para sistemas protegidos. Este uso gasta 1d4+1 ações completas e exige um kit. Você pode sofrer uma penalidade de -O em seu teste para fazê-lo como uma ação completa. Sem o kit, você sofre -5 nos testes de operar dispositivo."
+        ,
+    vontade:
+        "Você usa esta perícia para testes de resistência contra efeitos que exigem determinação, como intimidação e rituais que afetam a mente. A DT é determinada pelo efeito. Você também usa Vontade para conjurar rituais em condições adversas"
+        ,
+    sociedade:
+        "Você possui um vasto conhecimento sobre a história do mundo, tendo estudado de sua origem até os conhecimentos mais recentes. Esta perícia representa o conhecimento sobre o mundo em sua totalidade, englobando leis, sistemas de governo, línguas, períodos históricos, etc. Para efeitos mecânicos, ela pode ser utilizada como a perícia ciências, mas para assuntos que abordem ciências humanas e a linguística.\n\n" +
+        "## Decifrar Idioma\n" +
+        "Ao gastar uma ação de interlúdio ou uma hora, você traduz um texto escrito em outra língua que seja capaz de identificar. A DT é 15 para línguas comuns (dentre as mais faladas no mundo), 25 para línguas exóticas (dialetos específicos, ou línguas pouco utilizadas) e 35 para línguas mortas (línguas que perderam sua utilização ao longo do tempo). É possível sofrer -5 em seu teste para fazê-lo em 1 minuto. Identificar qual o idioma de um texto funciona da mesma forma, mas com a DT diminuída em 5.\n\n" +
+        "## Identificar Origem\n" +
+        "Você gasta uma ação padrão para identificar em que local e período de tempo um objeto foi criado ou possui características. A DT para tal, será definida pelo estado de conservação do objeto. Para objetos bem conservados, será 15, para objetos quebrados ou moderadamente deteriorados, será 25 e para objetos em estilhaços ou muito deteriorados, será 35. É possível receber +5 em seu teste ao gastar uma ação de interlúdio em vez de uma ação padrão, ou ao tentar descobrir apenas uma das informações citadas. Por fim, objetos advindos de sociedades pouco estudadas ou com uma história oculta, tem sua DT aumentada em 10."
+}
+
+const ritualExecutionOptions = [
+    { value: "padrao", label: "Padrão" },
+    { value: "reacao", label: "Reação" }
+]
+
+const ritualRangeOptions = [
+    { value: "pessoal", label: "Pessoal" },
+    { value: "toque", label: "Toque" },
+    { value: "curto", label: "Curto" },
+    { value: "medio", label: "Médio" },
+    { value: "longo", label: "Longo" },
+    { value: "extremo", label: "Extremo" },
+    { value: "ilimitado", label: "Ilimitado" }
+]
+
+const ritualDurationOptions = [
+    { value: "instantanea", label: "Instantânea" },
+    { value: "cena", label: "Cena" },
+    { value: "sustentada", label: "Sustentada" }
+]
+
+const ritualElementOptions = [
+    { value: "sangue", label: "Sangue" },
+    { value: "morte", label: "Morte" },
+    { value: "energia", label: "Energia" },
+    { value: "conhecimento", label: "Conhecimento" },
+    { value: "medo", label: "Medo" },
+    { value: "variavel", label: "Variável" }
+]
+
+const elementSpecialistOptions = ritualElementOptions.filter(
+    (option) => option.value !== "variavel"
+)
+const elementSpecialistStyleMap: Record<string, { base: string; selected: string }> = {
+    sangue: {
+        base: "border-red-500/50 bg-red-950/30 text-red-200 hover:border-red-400",
+        selected: "border-red-400 bg-red-900/40 text-red-100"
+    },
+    morte: {
+        base: "border-zinc-700 bg-black/40 text-zinc-200 hover:border-white/30",
+        selected: "border-white/60 bg-black/60 text-white"
+    },
+    energia: {
+        base: "border-purple-500/50 bg-purple-950/30 text-purple-200 hover:border-purple-400",
+        selected: "border-purple-400 bg-purple-900/40 text-purple-100"
+    },
+    conhecimento: {
+        base: "border-yellow-400/50 bg-yellow-950/30 text-yellow-200 hover:border-yellow-300",
+        selected: "border-yellow-300 bg-yellow-900/40 text-yellow-100"
+    },
+    medo: {
+        base: "border-white/50 bg-white/10 text-white hover:border-white",
+        selected: "border-white bg-white/20 text-white"
+    }
+}
+
+const ritualElementStyleMap: Record<string, { card: string; badge: string }> = {
+    conhecimento: {
+        card: "border-yellow-400/60 bg-yellow-950/30",
+        badge: "border-yellow-400/40 text-yellow-200 bg-yellow-900/30"
+    },
+    energia: {
+        card: "border-purple-500/60 bg-purple-950/30",
+        badge: "border-purple-500/40 text-purple-200 bg-purple-900/30"
+    },
+    morte: {
+        card: "border-zinc-800/80 bg-black/60",
+        badge: "border-zinc-700/70 text-zinc-200 bg-zinc-900/60"
+    },
+    sangue: {
+        card: "border-red-500/60 bg-red-950/30",
+        badge: "border-red-500/40 text-red-200 bg-red-900/30"
+    },
+    medo: {
+        card: "border-white/40 bg-white/5",
+        badge: "border-white/40 text-white bg-white/10"
+    },
+    variavel: {
+        card: "border-zinc-500/60 bg-zinc-900/70",
+        badge: "border-zinc-500/40 text-zinc-200 bg-zinc-800/50"
+    },
+    default: {
+        card: "border-purple-500/60 bg-zinc-900/70",
+        badge: "border-purple-500/40 text-purple-200 bg-purple-900/30"
+    }
+}
+
+const ritualElementIconMap: Record<string, string> = {
+    conhecimento: "/simbolos/elementos/conhecimento/Conhecimento.png",
+    energia: "/simbolos/elementos/energia/Energia.png",
+    morte: "/simbolos/elementos/morte/Morte.png",
+    sangue: "/simbolos/elementos/sangue/Sangue.png",
+    medo: "/simbolos/elementos/medo/Medo.png",
+}
+
+const ritualCircleOptions = [
+    { value: "1", label: "1º círculo" },
+    { value: "2", label: "2º círculo" },
+    { value: "3", label: "3º círculo" },
+    { value: "4", label: "4º círculo" }
+]
+
+const ritualFormDefaults = {
+    name: "",
+    description: "",
+    execution: "padrao",
+    ritual_range: "pessoal",
+    duration: "instantanea",
+    description_discente: "",
+    description_verdadeiro: "",
+    element: "conhecimento",
+    circle: "1",
+    pe_cost_discente: "0",
+    pe_cost_verdadeiro: "0"
+}
+
+const ritualStandardCostByCircle: Record<number, number> = {
+    1: 1,
+    2: 3,
+    3: 6,
+    4: 10
+}
+
 const getUnarmedDamageFormula = (nexTotal: number, hasArtistaMarcial: boolean) => {
     if (!hasArtistaMarcial) return "1d4"
     if (nexTotal >= 70) return "1d10"
@@ -338,6 +788,8 @@ export default function CharacterSheet() {
     const [isSavingExpertise, setIsSavingExpertise] = useState(false)
     const [isLevelUpOpen, setIsLevelUpOpen] = useState(false)
     const [isLevelingUp, setIsLevelingUp] = useState(false)
+    const [shouldOpenRitualAfterLevelUp, setShouldOpenRitualAfterLevelUp] = useState(false)
+    const [pendingRitualOccultismTest, setPendingRitualOccultismTest] = useState<PendingRitualOccultismTest | null>(null)
     const [originInfo, setOriginInfo] = useState<OriginSummary | null>(null)
     const [isOriginInfoOpen, setIsOriginInfoOpen] = useState(false)
     const [selectedAbility, setSelectedAbility] = useState<AbilitySummary | null>(null)
@@ -354,6 +806,7 @@ export default function CharacterSheet() {
     const [pendingSpecialAttack, setPendingSpecialAttack] = useState<PendingSpecialAttack | null>(null)
     const [pendingDemolishingStrike, setPendingDemolishingStrike] = useState(false)
     const [opportunityToast, setOpportunityToast] = useState<string | null>(null)
+    const [ritualOutcomeToast, setRitualOutcomeToast] = useState<string | null>(null)
     const [triggerHoldActive, setTriggerHoldActive] = useState(false)
     const [triggerHoldUses, setTriggerHoldUses] = useState(0)
     const [triggerHoldSpent, setTriggerHoldSpent] = useState(0)
@@ -363,6 +816,20 @@ export default function CharacterSheet() {
     const [isQuickHandsPromptOpen, setIsQuickHandsPromptOpen] = useState(false)
     const [isPrimeiraImpressaoPromptOpen, setIsPrimeiraImpressaoPromptOpen] = useState(false)
     const [pendingPrimeiraImpressao, setPendingPrimeiraImpressao] = useState<{
+        expertiseName: string
+        extraBonus?: { value: number; label?: string }
+        dicePenalty: number
+        options?: { successMin?: number; successLabel?: string }
+    } | null>(null)
+    const [isEnvoltoMisterioPromptOpen, setIsEnvoltoMisterioPromptOpen] = useState(false)
+    const [pendingEnvoltoMisterio, setPendingEnvoltoMisterio] = useState<{
+        expertiseName: string
+        extraBonus?: { value: number; label?: string }
+        dicePenalty: number
+        options?: { successMin?: number; successLabel?: string }
+    } | null>(null)
+    const [isIdentificacaoParanormalPromptOpen, setIsIdentificacaoParanormalPromptOpen] = useState(false)
+    const [pendingIdentificacaoParanormal, setPendingIdentificacaoParanormal] = useState<{
         expertiseName: string
         extraBonus?: { value: number; label?: string }
         dicePenalty: number
@@ -391,6 +858,28 @@ export default function CharacterSheet() {
     const [expandedWeaponIds, setExpandedWeaponIds] = useState<number[]>([])
     const [isWeaponRemoveConfirmOpen, setIsWeaponRemoveConfirmOpen] = useState(false)
     const [weaponToRemove, setWeaponToRemove] = useState<WeaponSummary | null>(null)
+    const [ritualOptions, setRitualOptions] = useState<RitualSummary[]>([])
+    const [ritualSearch, setRitualSearch] = useState("")
+    const [isRitualPickerOpen, setIsRitualPickerOpen] = useState(false)
+    const [isRitualOptionsLoading, setIsRitualOptionsLoading] = useState(false)
+    const [isAddingRitual, setIsAddingRitual] = useState(false)
+    const [ritualPickerMode, setRitualPickerMode] = useState<"list" | "custom" | "edit">("list")
+    const [ritualPickerSource, setRitualPickerSource] = useState<"manual" | "ritual_caster">("manual")
+    const [elementSpecialistChoice, setElementSpecialistChoice] = useState<string | null>(null)
+    const [isElementSpecialistOpen, setIsElementSpecialistOpen] = useState(false)
+    const [elementMasterChoice, setElementMasterChoice] = useState<string | null>(null)
+    const [isElementMasterOpen, setIsElementMasterOpen] = useState(false)
+    const [ritualPrediletoId, setRitualPrediletoId] = useState<number | null>(null)
+    const [isRitualPrediletoOpen, setIsRitualPrediletoOpen] = useState(false)
+    const [ritualForm, setRitualForm] = useState(() => ({ ...ritualFormDefaults }))
+    const [isCreatingRitual, setIsCreatingRitual] = useState(false)
+    const [expandedRitualIds, setExpandedRitualIds] = useState<number[]>([])
+    const [removingRitualId, setRemovingRitualId] = useState<number | null>(null)
+    const [ritualToEdit, setRitualToEdit] = useState<RitualSummary | null>(null)
+    const [ritualToRemove, setRitualToRemove] = useState<RitualSummary | null>(null)
+    const [isRitualRemoveConfirmOpen, setIsRitualRemoveConfirmOpen] = useState(false)
+    const [isExpertiseInfoOpen, setIsExpertiseInfoOpen] = useState(false)
+    const [expandedExpertiseInfo, setExpandedExpertiseInfo] = useState<string | null>(null)
     const [removingAbilityId, setRemovingAbilityId] = useState<number | null>(null)
     const [abilityToRemove, setAbilityToRemove] = useState<AbilitySummary | null>(null)
     const [isProficienciesInfoOpen, setIsProficienciesInfoOpen] = useState(false)
@@ -496,12 +985,46 @@ export default function CharacterSheet() {
     }, [isWeaponPickerOpen])
 
     useEffect(() => {
+        if (!isRitualPickerOpen) return
+        let isMounted = true
+        setIsRitualOptionsLoading(true)
+        api.get("/rituals/")
+            .then((res) => {
+                const list = Array.isArray(res.data?.rituals)
+                    ? res.data.rituals
+                    : Array.isArray(res.data)
+                        ? res.data
+                        : []
+                if (isMounted) setRitualOptions(list)
+            })
+            .catch((err) => {
+                console.error(err)
+                if (isMounted) setRitualOptions([])
+            })
+            .finally(() => {
+                if (isMounted) setIsRitualOptionsLoading(false)
+            })
+
+        return () => {
+            isMounted = false
+        }
+    }, [isRitualPickerOpen])
+
+    useEffect(() => {
         if (!opportunityToast) return
         const timeoutId = window.setTimeout(() => {
             setOpportunityToast(null)
         }, 8000)
         return () => window.clearTimeout(timeoutId)
     }, [opportunityToast])
+
+    useEffect(() => {
+        if (!ritualOutcomeToast) return
+        const timeoutId = window.setTimeout(() => {
+            setRitualOutcomeToast(null)
+        }, 8000)
+        return () => window.clearTimeout(timeoutId)
+    }, [ritualOutcomeToast])
 
     useEffect(() => {
         if (!isRollOpen && trilhaCertaBonusDice === 0) {
@@ -549,6 +1072,101 @@ export default function CharacterSheet() {
         }
     }, [character?.id, expertise])
 
+    useEffect(() => {
+        if (!character) return
+        const hasElementSpecialist = (character.abilities ?? []).some(
+            (ability) => normalizeText(ability.name) === "especialista em elemento"
+        )
+        if (!hasElementSpecialist) {
+            setElementSpecialistChoice(null)
+            return
+        }
+        const storageKey = `element_specialist_${character.id}`
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) {
+            setElementSpecialistChoice(null)
+            return
+        }
+        const normalized = normalizeText(raw)
+        const option = elementSpecialistOptions.find(
+            (item) => normalizeText(item.value) === normalized
+        )
+        setElementSpecialistChoice(option?.value ?? null)
+    }, [character?.id, character?.abilities])
+
+    useEffect(() => {
+        if (!character) return
+        const hasElementMaster = (character.abilities ?? []).some(
+            (ability) => isMestreEmElementoName(ability.name)
+        )
+        if (!hasElementMaster) {
+            setElementMasterChoice(null)
+            return
+        }
+        const storageKey = `element_master_${character.id}`
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) {
+            setElementMasterChoice(null)
+            return
+        }
+        const normalized = normalizeText(raw)
+        const option = elementSpecialistOptions.find(
+            (item) => normalizeText(item.value) === normalized
+        )
+        setElementMasterChoice(option?.value ?? null)
+    }, [character?.id, character?.abilities])
+
+    useEffect(() => {
+        if (!character) return
+        const hasRitualPredileto = (character.abilities ?? []).some(
+            (ability) => isRitualPrediletoName(ability.name)
+        )
+        if (!hasRitualPredileto) {
+            setRitualPrediletoId(null)
+            return
+        }
+        const storageKey = `ritual_predileto_${character.id}`
+        const raw = localStorage.getItem(storageKey)
+        const parsed = raw ? Number(raw) : NaN
+        if (!Number.isFinite(parsed)) {
+            setRitualPrediletoId(null)
+            return
+        }
+        const exists = (character.rituals ?? []).some((ritual) => ritual.id === parsed)
+        setRitualPrediletoId(exists ? parsed : null)
+    }, [character?.id, character?.abilities, character?.rituals])
+
+    useEffect(() => {
+        if (!pendingRitualOccultismTest || !rollResult) return
+        const normalizedExpertise = normalizeText(rollResult.expertise ?? "")
+        if (normalizedExpertise !== "ocultismo") return
+        const { ritualName, ritualVariant, peCost, dt } = pendingRitualOccultismTest
+        const total = rollResult.total ?? 0
+        const difference = total - dt
+        if (difference < 0) {
+            const mentalDamage = peCost
+            const permanentLoss = difference <= -5 ? 1 : 0
+            if (mentalDamage > 0 || permanentLoss > 0) {
+                applySanityChange(-mentalDamage, permanentLoss)
+            }
+            const variantLabel =
+                ritualVariant === "discente"
+                    ? "Discente"
+                    : ritualVariant === "verdadeiro"
+                        ? "Verdadeiro"
+                        : "Padrão"
+            const message = [
+                `${ritualName} (${variantLabel}) falhou.`,
+                mentalDamage > 0 ? `Dano mental: ${mentalDamage}.` : null,
+                permanentLoss > 0 ? "Perdeu 1 Sanidade permanente." : null
+            ].filter(Boolean).join(" ")
+            if (message) {
+                setRitualOutcomeToast(message)
+            }
+        }
+        setPendingRitualOccultismTest(null)
+    }, [pendingRitualOccultismTest, rollResult])
+
 
     async function updateStatus(field: StatusField, newValue: number) {
         try {
@@ -563,6 +1181,53 @@ export default function CharacterSheet() {
             console.log(err)
             alert("Erro ao atualizar dados do servidor")
         }
+    }
+
+    async function updateStatusBatch(payload: Record<string, number>) {
+        try {
+            await api.patch(
+                `/characters/${character!.id}/`,
+                payload,
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+        } catch (err) {
+            console.log(err)
+            alert("Erro ao atualizar dados do servidor")
+        }
+    }
+
+    const applySanityChange = (pointsDelta: number, permanentLoss: number) => {
+        if (!character) return
+        setCharacter((prev) => {
+            if (!prev) return prev
+            const nextMax = clamp(
+                prev.sanity_max - permanentLoss,
+                0,
+                prev.sanity_max
+            )
+            const nextPoints = clamp(
+                prev.sanity_points + pointsDelta,
+                0,
+                nextMax
+            )
+            const updates: Record<string, number> = {}
+            if (permanentLoss > 0) {
+                updates.sanity_max = nextMax
+            }
+            if (pointsDelta !== 0 || permanentLoss > 0) {
+                updates.sanity_points = nextPoints
+            }
+            if (Object.keys(updates).length > 0) {
+                updateStatusBatch(updates)
+            }
+            return {
+                ...prev,
+                sanity_max: nextMax,
+                sanity_points: nextPoints
+            }
+        })
     }
 
     const handleStatusChange = (field: StatusField, maxField: StatusMaxField, delta: number) => {
@@ -1086,8 +1751,41 @@ export default function CharacterSheet() {
         expertiseName: string,
         extraBonus?: { value: number; label?: string },
         dicePenalty = 0,
-        options?: { successMin?: number; successLabel?: string }
+        options?: { successMin?: number; successLabel?: string },
+        skipEnvoltoMisterio = false,
+        skipIdentificacaoParanormal = false
     ) => {
+        const shouldSkipIdentificacaoParanormal =
+            skipIdentificacaoParanormal
+            || Boolean(options?.successLabel?.toLowerCase().includes("ritual"))
+        if (
+            !shouldSkipIdentificacaoParanormal
+            && hasIdentificacaoParanormal
+            && identificacaoParanormalExpertiseSet.has(normalizeText(expertiseName))
+        ) {
+            setPendingIdentificacaoParanormal({
+                expertiseName,
+                extraBonus,
+                dicePenalty,
+                options
+            })
+            setIsIdentificacaoParanormalPromptOpen(true)
+            return
+        }
+        if (
+            !skipEnvoltoMisterio
+            && hasEnvoltoMisterio
+            && envoltoMisterioExpertiseSet.has(normalizeText(expertiseName))
+        ) {
+            setPendingEnvoltoMisterio({
+                expertiseName,
+                extraBonus,
+                dicePenalty,
+                options
+            })
+            setIsEnvoltoMisterioPromptOpen(true)
+            return
+        }
         if (
             hasPrimeiraImpressao
             && primeiraImpressaoExpertiseSet.has(normalizeText(expertiseName))
@@ -1276,6 +1974,50 @@ export default function CharacterSheet() {
         setWeaponForm(prev => ({ ...prev, [name]: value }))
     }
 
+    const handleRitualInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target
+        setRitualForm(prev => ({ ...prev, [name]: value }))
+    }
+
+    const handleRitualSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const { name, value } = e.target
+        setRitualForm(prev => ({ ...prev, [name]: value }))
+    }
+
+    const handleRitualTextAreaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const { name, value } = e.target
+        setRitualForm(prev => ({ ...prev, [name]: value }))
+    }
+
+    const openRitualEdit = (ritual: RitualSummary) => {
+        const standard = ritualStandardCostByCircle[ritual.circle] ?? 0
+        setRitualToEdit(ritual)
+        setRitualPickerSource("manual")
+        setRitualForm({
+            name: ritual.name ?? "",
+            description: ritual.description ?? "",
+            execution: ritual.execution ?? "padrao",
+            ritual_range: ritual.ritual_range ?? "pessoal",
+            duration: ritual.duration ?? "instantanea",
+            description_discente: ritual.description_discente ?? "",
+            description_verdadeiro: ritual.description_verdadeiro ?? "",
+            element: ritual.element ?? "conhecimento",
+            circle: String(ritual.circle ?? 1),
+            pe_cost_discente: String(Math.max(0, (ritual.pe_cost_discente ?? 0) - standard)),
+            pe_cost_verdadeiro: String(Math.max(0, (ritual.pe_cost_verdadeiro ?? 0) - standard))
+        })
+        setRitualPickerMode("edit")
+        setIsRitualPickerOpen(true)
+    }
+
+    const openRitualPicker = (source: "manual" | "ritual_caster" = "manual") => {
+        setRitualPickerSource(source)
+        setRitualPickerMode("list")
+        setRitualSearch("")
+        setRitualToEdit(null)
+        setIsRitualPickerOpen(true)
+    }
+
     const openWeaponEdit = (weapon: WeaponSummary) => {
         if (weapon.id === UNARMED_WEAPON_ID) return
         setWeaponToEdit(weapon)
@@ -1321,6 +2063,24 @@ export default function CharacterSheet() {
             setAbilitySearch("")
             if (normalizeText(ability.name) === "perito") {
                 openPeritoConfig()
+            }
+            if (isRitualCasterAbility(ability)) {
+                openRitualPicker("ritual_caster")
+            }
+            if (normalizeText(ability.name) === "especialista em elemento") {
+                if (!elementSpecialistChoice) {
+                    setIsElementSpecialistOpen(true)
+                }
+            }
+            if (isMestreEmElementoName(ability.name)) {
+                if (!elementMasterChoice) {
+                    setIsElementMasterOpen(true)
+                }
+            }
+            if (isRitualPrediletoName(ability.name)) {
+                if (!ritualPrediletoId) {
+                    setIsRitualPrediletoOpen(true)
+                }
             }
         } catch (err) {
             console.error(err)
@@ -1499,6 +2259,207 @@ export default function CharacterSheet() {
         }
     }
 
+    const handleCreateRitual = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        if (!character) return
+        const ritualCircle = toNumber(ritualForm.circle, 1)
+        if (hasRitualCaster && ritualCircle > ritualCasterMaxCircle) {
+            alert(
+                `Escolhido Pelo Outro Lado: círculo máximo ${ritualCasterMaxCircle} (NEX ${character.nex_total}%).`
+            )
+            return
+        }
+        setIsCreatingRitual(true)
+        try {
+            const payload = {
+                name: ritualForm.name.trim(),
+                description: ritualForm.description.trim(),
+                execution: ritualForm.execution,
+                ritual_range: ritualForm.ritual_range,
+                duration: ritualForm.duration,
+                description_discente: ritualForm.description_discente.trim(),
+                description_verdadeiro: ritualForm.description_verdadeiro.trim(),
+                element: ritualForm.element,
+                circle: ritualCircle,
+                pe_cost_discente: Number(ritualForm.pe_cost_discente),
+                pe_cost_verdadeiro: Number(ritualForm.pe_cost_verdadeiro)
+            }
+
+            const createdResponse = await api.post("/rituals/", payload)
+            const createdRitual = createdResponse.data as RitualSummary
+            setRitualOptions(prev =>
+                [...prev, createdRitual].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+            )
+
+            const response = await api.post(
+                `/characters/${character.id}/rituals/${createdRitual.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+            setRitualForm({ ...ritualFormDefaults })
+            setRitualSearch("")
+            setRitualPickerMode("list")
+            setIsRitualPickerOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao criar ritual")
+        } finally {
+            setIsCreatingRitual(false)
+        }
+    }
+
+    const handleUpdateRitual = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        if (!character || !ritualToEdit) return
+        const ritualCircle = toNumber(ritualForm.circle, ritualToEdit.circle ?? 1)
+        const isSameCircle = ritualCircle === (ritualToEdit.circle ?? ritualCircle)
+        if (hasRitualCaster && ritualCircle > ritualCasterMaxCircle && !isSameCircle) {
+            alert(
+                `Escolhido Pelo Outro Lado: círculo máximo ${ritualCasterMaxCircle} (NEX ${character.nex_total}%).`
+            )
+            return
+        }
+        setIsCreatingRitual(true)
+        try {
+            const payload = {
+                name: ritualForm.name.trim(),
+                description: ritualForm.description.trim(),
+                execution: ritualForm.execution,
+                ritual_range: ritualForm.ritual_range,
+                duration: ritualForm.duration,
+                description_discente: ritualForm.description_discente.trim(),
+                description_verdadeiro: ritualForm.description_verdadeiro.trim(),
+                element: ritualForm.element,
+                circle: ritualCircle,
+                pe_cost_discente: Number(ritualForm.pe_cost_discente),
+                pe_cost_verdadeiro: Number(ritualForm.pe_cost_verdadeiro)
+            }
+
+            const response = await api.patch(
+                `/characters/${character.id}/rituals/${ritualToEdit.id}`,
+                payload
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+            const updatedRitual = Array.isArray(updated?.rituals)
+                ? (updated.rituals as RitualSummary[]).find(
+                    (item) => item.id === ritualToEdit.id
+                )
+                : null
+            if (updatedRitual) {
+                setRitualOptions(prev =>
+                    prev
+                        .map((item) => (item.id === updatedRitual.id ? updatedRitual : item))
+                        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+                )
+            }
+            setRitualToEdit(null)
+            setRitualForm({ ...ritualFormDefaults })
+            setRitualSearch("")
+            setRitualPickerMode("list")
+            setIsRitualPickerOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao editar ritual")
+        } finally {
+            setIsCreatingRitual(false)
+        }
+    }
+
+    const handleAddRitual = async (ritual: RitualSummary) => {
+        if (!character) return
+        if (hasRitualCaster && ritual.circle > ritualCasterMaxCircle) {
+            alert(
+                `Escolhido Pelo Outro Lado: círculo máximo ${ritualCasterMaxCircle} (NEX ${character.nex_total}%).`
+            )
+            return
+        }
+        setIsAddingRitual(true)
+        try {
+            const response = await api.post(
+                `/characters/${character.id}/rituals/${ritual.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+            setIsRitualPickerOpen(false)
+            setRitualSearch("")
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao adicionar ritual")
+        } finally {
+            setIsAddingRitual(false)
+        }
+    }
+
+    const handleRemoveRitual = async (ritual: RitualSummary) => {
+        if (!character) return
+        setRemovingRitualId(ritual.id)
+        try {
+            const response = await api.delete(
+                `/characters/${character.id}/rituals/${ritual.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao remover ritual")
+        } finally {
+            setRemovingRitualId(null)
+        }
+    }
+
     const handleRemoveAbility = async (ability: AbilitySummary) => {
         if (!character) return
         if (originInfo?.id != null && ability.origin_id === originInfo.id) {
@@ -1563,6 +2524,25 @@ export default function CharacterSheet() {
                 setPendingPrimeiraImpressao(null)
                 setIsPrimeiraImpressaoPromptOpen(false)
             }
+            if (isIdentificacaoParanormalName(ability.name)) {
+                setPendingIdentificacaoParanormal(null)
+                setIsIdentificacaoParanormalPromptOpen(false)
+            }
+            if (normalizeText(ability.name) === "especialista em elemento") {
+                setElementSpecialistChoice(null)
+                setIsElementSpecialistOpen(false)
+                localStorage.removeItem(elementSpecialistStorageKey)
+            }
+            if (isMestreEmElementoName(ability.name)) {
+                setElementMasterChoice(null)
+                setIsElementMasterOpen(false)
+                localStorage.removeItem(elementMasterStorageKey)
+            }
+            if (isRitualPrediletoName(ability.name)) {
+                setRitualPrediletoId(null)
+                setIsRitualPrediletoOpen(false)
+                localStorage.removeItem(ritualPrediletoStorageKey)
+            }
         } catch (err) {
             console.error(err)
             alert("Erro ao remover habilidade")
@@ -1625,6 +2605,9 @@ export default function CharacterSheet() {
                 old: oldCharacter,
                 new: newCharacter
             })
+
+            const shouldOpenRitualPicker = (newCharacter.abilities ?? []).some(isRitualCasterAbility)
+            setShouldOpenRitualAfterLevelUp(shouldOpenRitualPicker)
 
             setIsLevelUpOpen(false)
         } catch (err) {
@@ -1720,6 +2703,15 @@ export default function CharacterSheet() {
     const abilities = (character.abilities ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
+    const originAbilityLabels = originInfo?.id != null
+        ? Array.from(
+            new Set(
+                abilities
+                    .filter((ability) => ability.origin_id === originInfo.id)
+                    .map((ability) => ability.name)
+            )
+        ).sort((a, b) => a.localeCompare(b, "pt-BR"))
+        : []
     const proficiencies = (character.proficiencies ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
@@ -1761,6 +2753,9 @@ export default function CharacterSheet() {
         weapon_type: "corpo_a_corpo"
     }
     const weapons = [unarmedWeapon, ...baseWeapons]
+    const rituals = (character.rituals ?? []).slice().sort((a, b) =>
+        a.circle - b.circle || a.name.localeCompare(b.name, "pt-BR")
+    )
     const trainedExpertise = new Set(
         Object.entries(expertise ?? {})
             .filter(([, stats]) => (stats?.treino ?? 0) > 0)
@@ -1770,9 +2765,11 @@ export default function CharacterSheet() {
     const baseResistanceBonus = character.resistance_bonus ?? 0
     const assignedAbilityIds = new Set(abilities.map((ability) => ability.id))
     const assignedWeaponIds = new Set(baseWeapons.map((weapon) => weapon.id))
+    const assignedRitualIds = new Set(rituals.map((ritual) => ritual.id))
     const abilitySearchTerm = abilitySearch.trim().toLowerCase()
     const characterClassKey = reverseFormatEnum(character.character_class)
     const weaponSearchTerm = normalizeText(weaponSearch.trim())
+    const ritualSearchTerm = normalizeText(ritualSearch.trim())
     const availableWeapons = weaponOptions
         .filter((weapon) => !assignedWeaponIds.has(weapon.id))
         .filter((weapon) => {
@@ -1782,6 +2779,12 @@ export default function CharacterSheet() {
             )
             return haystack.includes(weaponSearchTerm)
         })
+    const ritualCircleValue = clamp(toNumber(ritualForm.circle, 1), 1, 4)
+    const ritualStandardCost = ritualStandardCostByCircle[ritualCircleValue] ?? 0
+    const ritualDiscenteTotal =
+        ritualStandardCost + Math.max(0, toNumber(ritualForm.pe_cost_discente, 0))
+    const ritualVerdadeiroTotal =
+        ritualStandardCost + Math.max(0, toNumber(ritualForm.pe_cost_verdadeiro, 0))
     const attributeValueMap: Record<string, number> = {
         strength: character.atrib_strength,
         agility: character.atrib_agility,
@@ -1798,6 +2801,53 @@ export default function CharacterSheet() {
     const hasPrimeiraImpressao = abilities.some(
         (ability) => normalizeText(ability.name) === "primeira impressao"
     )
+    const hasEnvoltoMisterio = abilities.some(
+        (ability) => normalizeText(ability.name) === "envolto em misterio"
+    )
+    const hasIdentificacaoParanormal = abilities.some(
+        (ability) => isIdentificacaoParanormalName(ability.name)
+    )
+    const hasElementMaster = abilities.some(
+        (ability) => isMestreEmElementoName(ability.name)
+    )
+    const hasRitualPredileto = abilities.some(
+        (ability) => isRitualPrediletoName(ability.name)
+    )
+    const hasTatuagemRitualistica = abilities.some(
+        (ability) => isTatuagemRitualisticaName(ability.name)
+    )
+    const ritualCasterAbility = abilities.find(isRitualCasterAbility)
+    const ritualCasterEffect = parseRitualCasterEffect(ritualCasterAbility?.effect ?? null)
+    const hasRitualCaster = Boolean(ritualCasterEffect)
+    const ritualCasterMaxCircle = ritualCasterEffect
+        ? getMaxRitualCircle(ritualCasterEffect.circles, character.nex_total)
+        : 0
+    const ritualCasterExtraCount = ritualCasterEffect
+        ? ritualCasterEffect.startingCount
+            + Math.floor(Math.max(0, character.nex_total) / 5)
+            * ritualCasterEffect.learnOnNexCount
+        : 0
+    const ritualCasterRemainingCount = hasRitualCaster
+        ? Math.max(0, ritualCasterExtraCount - rituals.length)
+        : 0
+    const canUseRitualCircle = (circle: number) =>
+        !hasRitualCaster || circle <= ritualCasterMaxCircle
+    const allowedRitualCircleOptions = ritualCircleOptions.filter((option) => {
+        if (!hasRitualCaster) return true
+        const value = toNumber(option.value, 0)
+        if (value <= ritualCasterMaxCircle) return true
+        return ritualPickerMode === "edit" && value === toNumber(ritualForm.circle, 0)
+    })
+    const availableRituals = ritualOptions
+        .filter((ritual) => !assignedRitualIds.has(ritual.id))
+        .filter((ritual) => canUseRitualCircle(ritual.circle ?? 0))
+        .filter((ritual) => {
+            if (!ritualSearchTerm) return true
+            const haystack = normalizeText(
+                `${ritual.name} ${ritual.description} ${ritual.element} ${ritual.execution} ${ritual.ritual_range} ${ritual.duration} ${ritual.circle}`
+            )
+            return haystack.includes(ritualSearchTerm)
+        })
     const hasPerito = abilities.some(
         (ability) => normalizeText(ability.name) === "perito"
     )
@@ -1834,6 +2884,14 @@ export default function CharacterSheet() {
     const peritoSkillLabels = peritoSkills
         .map((name) => expertiseLabelMap[name] ?? formatEnum(name))
         .join(", ")
+    const expertiseInfoList = Object.keys(expertiseLabelMap).sort((a, b) => {
+        const aLabel = expertiseLabelMap[a] ?? formatEnum(a)
+        const bLabel = expertiseLabelMap[b] ?? formatEnum(b)
+        return aLabel.localeCompare(bLabel, "pt-BR")
+    })
+    const elementSpecialistStorageKey = `element_specialist_${character.id}`
+    const elementMasterStorageKey = `element_master_${character.id}`
+    const ritualPrediletoStorageKey = `ritual_predileto_${character.id}`
 
     const getAbilityRequirementIssues = (ability: AbilitySummary) => {
         const rawRequirements = ability.requirements as unknown
@@ -1994,6 +3052,8 @@ export default function CharacterSheet() {
     const quickHandsCost = 1
     const nerdCost = 2
     const pensamentoAgilCost = 2
+    const camuflarOcultismoCost = 2
+    const guiadoParanormalCost = 2
     const trilhaCertaBaseCost = 1
     const triggerHoldBaseCost = 2
     const sentidoTaticoCost = 2
@@ -2274,6 +3334,53 @@ export default function CharacterSheet() {
         )
     }
 
+    const handleConfirmEnvoltoMisterio = (applyBonus: boolean) => {
+        const pending = pendingEnvoltoMisterio
+        if (!pending) {
+            setIsEnvoltoMisterioPromptOpen(false)
+            return
+        }
+        setIsEnvoltoMisterioPromptOpen(false)
+        setPendingEnvoltoMisterio(null)
+        const updatedBonus = applyBonus
+            ? mergeExtraBonus(pending.extraBonus, {
+                value: 5,
+                label: "Envolto em Mistério"
+            })
+            : pending.extraBonus
+        requestRollExpertise(
+            pending.expertiseName,
+            updatedBonus,
+            pending.dicePenalty,
+            pending.options,
+            true
+        )
+    }
+
+    const handleConfirmIdentificacaoParanormal = (applyBonus: boolean) => {
+        const pending = pendingIdentificacaoParanormal
+        if (!pending) {
+            setIsIdentificacaoParanormalPromptOpen(false)
+            return
+        }
+        setIsIdentificacaoParanormalPromptOpen(false)
+        setPendingIdentificacaoParanormal(null)
+        const updatedBonus = applyBonus
+            ? mergeExtraBonus(pending.extraBonus, {
+                value: 10,
+                label: "Identificação Paranormal"
+            })
+            : pending.extraBonus
+        requestRollExpertise(
+            pending.expertiseName,
+            updatedBonus,
+            pending.dicePenalty,
+            pending.options,
+            false,
+            true
+        )
+    }
+
     const handleConfirmPrimeiraImpressao = (applyBonus: boolean) => {
         const pending = pendingPrimeiraImpressao
         if (!pending) {
@@ -2292,6 +3399,35 @@ export default function CharacterSheet() {
                 extraDiceLabel: applyBonus ? "Primeira Impressão" : undefined
             }
         )
+    }
+
+    const handleSelectElementSpecialist = (value: string) => {
+        const normalized = normalizeText(value)
+        const option = elementSpecialistOptions.find(
+            (item) => normalizeText(item.value) === normalized
+        )
+        if (!option) return
+        setElementSpecialistChoice(option.value)
+        localStorage.setItem(elementSpecialistStorageKey, option.value)
+        setIsElementSpecialistOpen(false)
+    }
+
+    const handleSelectElementMaster = (value: string) => {
+        const normalized = normalizeText(value)
+        const option = elementSpecialistOptions.find(
+            (item) => normalizeText(item.value) === normalized
+        )
+        if (!option) return
+        setElementMasterChoice(option.value)
+        localStorage.setItem(elementMasterStorageKey, option.value)
+        setIsElementMasterOpen(false)
+    }
+
+    const handleSelectRitualPredileto = (ritualId: number) => {
+        if (!Number.isFinite(ritualId)) return
+        setRitualPrediletoId(ritualId)
+        localStorage.setItem(ritualPrediletoStorageKey, String(ritualId))
+        setIsRitualPrediletoOpen(false)
     }
 
     const openPeritoConfig = () => {
@@ -2357,6 +3493,73 @@ export default function CharacterSheet() {
         setOpportunityToast("Habilidade Tiro de Cobertura ativa, gasto 1 PE")
     }
 
+    const handleUseCamuflarOcultismo = () => {
+        if (camuflarOcultismoCost > currentEffort) {
+            alert("PE insuficiente para Camuflar Ocultismo.")
+            return
+        }
+        if (camuflarOcultismoCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -camuflarOcultismoCost)
+        }
+        setOpportunityToast(
+            `Camuflar Ocultismo ativo, gasto ${camuflarOcultismoCost} PE`
+        )
+    }
+
+    const handleUseGuiadoParanormal = () => {
+        if (guiadoParanormalCost > currentEffort) {
+            alert("PE insuficiente para Guiado Pelo Paranormal.")
+            return
+        }
+        if (guiadoParanormalCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -guiadoParanormalCost)
+        }
+        setOpportunityToast(
+            `Guiado pelo paranormal ativado, gasto ${guiadoParanormalCost} PE`
+        )
+    }
+
+    const handleUseRitual = (
+        ritual: RitualSummary,
+        variant: "padrao" | "discente" | "verdadeiro",
+        cost: number
+    ) => {
+        if (cost > currentEffort) {
+            alert("PE insuficiente para usar este ritual.")
+            return
+        }
+        if (cost > 0) {
+            handleStatusChange("effort_points", "effort_max", -cost)
+        }
+        const dt = 20 + cost
+        setPendingRitualOccultismTest({
+            ritualName: ritual.name,
+            ritualVariant: variant,
+            peCost: cost,
+            dt
+        })
+        requestRollExpertise(
+            "ocultismo",
+            undefined,
+            0,
+            {
+                successMin: dt,
+                successLabel: `DT Ritual (${dt})`
+            },
+            false,
+            true
+        )
+        const label =
+            variant === "discente"
+                ? "Discente"
+                : variant === "verdadeiro"
+                    ? "Verdadeiro"
+                    : "Padrão"
+        setOpportunityToast(
+            `${ritual.name} (${label}) ativado, gasto ${cost} PE`
+        )
+    }
+
     const handleActivateTriggerHold = () => {
         if (triggerHoldActive) return
         if (triggerHoldBaseCost > currentEffort) {
@@ -2419,6 +3622,13 @@ export default function CharacterSheet() {
         const isConhecimentoAplicado = normalizeText(ability.name) === "conhecimento aplicado"
         const isEcletico = normalizeText(ability.name) === "ecletico"
         const isSuppressiveFire = normalizeText(ability.name) === "tiro de cobertura"
+        const isCamuflarOcultismo = normalizeText(ability.name) === "camuflar ocultismo"
+        const isGuiadoParanormal = normalizeText(ability.name) === "guiado pelo paranormal"
+        const isElementSpecialist = normalizeText(ability.name) === "especialista em elemento"
+        const isElementMaster = isMestreEmElementoName(ability.name)
+        const isRitualPredileto = isRitualPrediletoName(ability.name)
+        const canChooseElementSpecialist = isElementSpecialist && !elementSpecialistChoice
+        const canChooseElementMaster = isElementMaster && !elementMasterChoice
         const isClickableAbility =
             isSpecialAttack
             || isOpportunityAttack
@@ -2438,6 +3648,18 @@ export default function CharacterSheet() {
             || isConhecimentoAplicado
             || isEcletico
             || isSuppressiveFire
+            || isCamuflarOcultismo
+            || isGuiadoParanormal
+            || canChooseElementSpecialist
+            || canChooseElementMaster
+        const abilityClassKey = normalizeText(ability.class_name ?? "")
+        const hoverBorderClass = isClickableAbility
+            ? abilityClassKey === "ocultista"
+                ? "hover:border-purple-500/60"
+                : abilityClassKey === "combatente"
+                    ? "hover:border-red-500/60"
+                    : "hover:border-emerald-500/60"
+            : ""
         const basePeCost = ability.pe_cost ?? 0
         const peCost = isDemolishingStrike
             ? Math.max(demolishingStrikeCost, basePeCost)
@@ -2483,6 +3705,31 @@ export default function CharacterSheet() {
         if (isSpecialAttack && specialAttackCostValues.length > 0) {
             metaParts.push(specialAttackCostLabel)
         }
+        if (isElementSpecialist) {
+            metaParts.push(
+                elementSpecialistChoice
+                    ? `DT +2 (${formatEnum(elementSpecialistChoice)})`
+                    : "Escolher Elemento"
+            )
+        }
+        if (isElementMaster) {
+            metaParts.push(
+                elementMasterChoice
+                    ? `PE -1 (${formatEnum(elementMasterChoice)})`
+                    : "Escolher Elemento"
+            )
+        }
+        if (isRitualPredileto) {
+            const ritualName =
+                ritualPrediletoId != null
+                    ? rituals.find((ritual) => ritual.id === ritualPrediletoId)?.name
+                    : null
+            metaParts.push(
+                ritualName
+                    ? `PE -1 (${ritualName})`
+                    : "Escolher Ritual"
+            )
+        }
 
         return (
             <div
@@ -2520,11 +3767,19 @@ export default function CharacterSheet() {
                                                                                 ? handleOpenPeritoUse
                                                                             : isNaTrilhaCerta
                                                                                 ? handleShowTrilhaCertaInfo
-                                                                            : isTriggerHold
-                                                                ? handleActivateTriggerHold
-                                                                : isSuppressiveFire
-                                                                ? handleUseSuppressiveFire
-                                                                : undefined
+                                    : isTriggerHold
+                                        ? handleActivateTriggerHold
+                                        : isSuppressiveFire
+                                        ? handleUseSuppressiveFire
+                                        : isCamuflarOcultismo
+                                        ? handleUseCamuflarOcultismo
+                                        : isGuiadoParanormal
+                                        ? handleUseGuiadoParanormal
+                                        : canChooseElementSpecialist
+                                        ? () => setIsElementSpecialistOpen(true)
+                                        : canChooseElementMaster
+                                        ? () => setIsElementMasterOpen(true)
+                                        : undefined
                 }
                 onKeyDown={(event) => {
                     if (!isClickableAbility) return
@@ -2566,6 +3821,14 @@ export default function CharacterSheet() {
                             handleActivateTriggerHold()
                         } else if (isSuppressiveFire) {
                             handleUseSuppressiveFire()
+                        } else if (isCamuflarOcultismo) {
+                            handleUseCamuflarOcultismo()
+                        } else if (isGuiadoParanormal) {
+                            handleUseGuiadoParanormal()
+                        } else if (canChooseElementSpecialist) {
+                            setIsElementSpecialistOpen(true)
+                        } else if (canChooseElementMaster) {
+                            setIsElementMasterOpen(true)
                         }
                     }
                 }}
@@ -2573,7 +3836,7 @@ export default function CharacterSheet() {
                 tabIndex={isClickableAbility ? 0 : undefined}
                 className={`flex items-center justify-between gap-3 bg-zinc-900/70 border border-zinc-700 rounded-lg p-3 ${
                     isClickableAbility
-                        ? "cursor-pointer hover:border-emerald-500/60 focus:outline-none"
+                        ? `cursor-pointer ${hoverBorderClass} focus:outline-none`
                         : ""
                 }`}
             >
@@ -2646,6 +3909,224 @@ export default function CharacterSheet() {
                 </div>
             </div>
         )
+    }
+
+    const renderRitualItem = (ritual: RitualSummary) => {
+        const isExpanded = expandedRitualIds.includes(ritual.id)
+        const discenteDescription = ritual.description_discente?.trim()
+        const verdadeiroDescription = ritual.description_verdadeiro?.trim()
+        const normalizedElement = normalizeText(ritual.element ?? "")
+        const elementStyles =
+            ritualElementStyleMap[normalizedElement] ?? ritualElementStyleMap.default
+        const elementIcon = ritualElementIconMap[normalizedElement]
+        const ritualElementReduction =
+            hasElementMaster
+            && elementMasterChoice
+            && normalizeText(elementMasterChoice) === normalizedElement
+                ? 1
+                : 0
+        const ritualPrediletoReduction =
+            hasRitualPredileto && ritualPrediletoId === ritual.id ? 1 : 0
+        const ritualRangeReduction =
+            hasTatuagemRitualistica && normalizeText(ritual.ritual_range ?? "") === "pessoal"
+                ? 1
+                : 0
+        const ritualCostReduction =
+            ritualElementReduction + ritualPrediletoReduction + ritualRangeReduction
+        const standardCost = applyRitualCostReduction(ritual.pe_cost_standard, ritualCostReduction)
+        const discenteCost = applyRitualCostReduction(ritual.pe_cost_discente, ritualCostReduction)
+        const verdadeiroCost = applyRitualCostReduction(ritual.pe_cost_verdadeiro, ritualCostReduction)
+        return (
+            <div
+                key={ritual.id}
+                className={`w-full border rounded-lg overflow-hidden ${elementStyles.card}`}
+            >
+                <div className="flex items-start justify-between gap-3 px-4 pt-3 pb-3 border-b border-zinc-700/70">
+                    <div className="flex flex-col gap-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                            {elementIcon && (
+                                <div className="h-12 w-12 rounded-full bg-black/40 border border-zinc-700/60 flex items-center justify-center">
+                                    <img
+                                        src={elementIcon}
+                                        alt={`Símbolo de ${formatEnum(ritual.element)}`}
+                                        className="h-8 w-8 object-contain"
+                                    />
+                                </div>
+                            )}
+                            <span className="text-white font-text text-lg">
+                                {ritual.name}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded border ${elementStyles.badge}`}>
+                                Círculo {ritual.circle}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded border ${elementStyles.badge}`}>
+                                {formatEnum(ritual.element)}
+                            </span>
+                        </div>
+                        <div className="text-xs text-zinc-400 font-text">
+                            Execução {formatEnum(ritual.execution)} | Alcance{" "}
+                            {formatEnum(ritual.ritual_range)} | Duração{" "}
+                            {formatEnum(ritual.duration)}
+                        </div>
+                        <div className="text-xs text-zinc-400 font-text">
+                            PE padrão {standardCost} | Discente{" "}
+                            {discenteCost} | Verdadeiro{" "}
+                            {verdadeiroCost}
+                        </div>
+                        {ritualCostReduction > 0 && (
+                            <div className="text-[11px] text-emerald-200 flex flex-wrap gap-x-2">
+                                {ritualElementReduction > 0 && (
+                                    <span>Mestre em Elemento: -{ritualElementReduction} PE</span>
+                                )}
+                                {ritualPrediletoReduction > 0 && (
+                                    <span>Ritual Predileto: -{ritualPrediletoReduction} PE</span>
+                                )}
+                                {ritualRangeReduction > 0 && (
+                                    <span>Tatuagem Ritualística: -{ritualRangeReduction} PE</span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setExpandedRitualIds((prev) =>
+                                    prev.includes(ritual.id)
+                                        ? prev.filter((id) => id !== ritual.id)
+                                        : [...prev, ritual.id]
+                                )
+                            }}
+                            className="text-blue-400 hover:text-blue-300 transition-colors"
+                            title="Descrição do ritual"
+                            aria-label="Descrição do ritual"
+                        >
+                            {isExpanded ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => openRitualEdit(ritual)}
+                            className="text-yellow-400 hover:text-yellow-200 transition-colors"
+                            title="Editar ritual"
+                            aria-label="Editar ritual"
+                        >
+                            <Pencil size={18} />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setRitualToRemove(ritual)
+                                setIsRitualRemoveConfirmOpen(true)
+                            }}
+                            disabled={removingRitualId === ritual.id}
+                            className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            title="Remover ritual"
+                            aria-label="Remover ritual"
+                        >
+                            <Trash2 size={18} />
+                        </button>
+                    </div>
+                </div>
+                {isExpanded && (
+                    <div className="px-4 py-3 text-sm text-zinc-300 font-text flex flex-col gap-3">
+                        <div className="text-zinc-200">
+                            {ritual.description?.trim()
+                                ? ritual.description
+                                : "Descrição não disponível."}
+                        </div>
+                        <div>
+                            <div className="text-xs uppercase text-zinc-500">Discente</div>
+                            <div className="text-zinc-300">
+                                {discenteDescription || "Sem descrição discente."}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs uppercase text-zinc-500">Verdadeiro</div>
+                            <div className="text-zinc-300">
+                                {verdadeiroDescription || "Sem descrição verdadeiro."}
+                            </div>
+                        </div>
+                    </div>
+                )}
+                <div className="grid grid-cols-3 text-sm text-zinc-200 border-t border-zinc-700/70 rounded-none overflow-hidden">
+                    <button
+                        type="button"
+                        onClick={() => handleUseRitual(ritual, "padrao", Number(standardCost ?? 0))}
+                        className="py-2 border-r border-zinc-700 hover:bg-zinc-800 transition-colors font-text flex flex-col items-center leading-tight text-blue-300"
+                    >
+                        <span>Padrão</span>
+                        <span className="text-xs text-blue-200">PE {standardCost ?? 0}</span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleUseRitual(ritual, "discente", Number(discenteCost ?? 0))}
+                        disabled={!discenteDescription}
+                        className="py-2 border-r border-zinc-700 hover:bg-zinc-800 transition-colors font-text text-red-300 flex flex-col items-center leading-tight disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <span>Discente</span>
+                        <span className="text-xs text-red-200">
+                            {discenteDescription ? `PE ${discenteCost ?? 0}` : "-"}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleUseRitual(ritual, "verdadeiro", Number(verdadeiroCost ?? 0))}
+                        disabled={!verdadeiroDescription}
+                        className="py-2 hover:bg-zinc-800 transition-colors font-text text-red-400 flex flex-col items-center leading-tight disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <span>Verdadeiro</span>
+                        <span className="text-xs text-red-300">
+                            {verdadeiroDescription ? `PE ${verdadeiroCost ?? 0}` : "-"}
+                        </span>
+                    </button>
+                </div>
+            </div>
+        )
+    }
+
+    const renderDtHighlights = (text: string) => {
+        const parts = text.split(/(DT\s*\d+)/g)
+        return parts.map((part, index) => {
+            if (/^DT\s*\d+$/.test(part)) {
+                return (
+                    <span key={`dt-${index}`} className="font-semibold text-red-400">
+                        {part}
+                    </span>
+                )
+            }
+            return part
+        })
+    }
+
+    const renderExpertiseDescription = (raw: string) => {
+        const paragraphs = raw
+            .split(/\n\s*\n/)
+            .map((item) => item.trim())
+            .filter(Boolean)
+        return paragraphs.map((paragraph, index) => {
+            if (paragraph.startsWith("## ")) {
+                const [titleLine, ...restLines] = paragraph.split("\n")
+                const title = titleLine.replace(/^##\s*/, "")
+                const rest = restLines.join("\n").trim()
+                return (
+                    <div key={`exp-title-${index}`} className="text-sm flex flex-col gap-2">
+                        <span className="font-semibold text-red-400">
+                            {renderDtHighlights(title)}
+                        </span>
+                        {rest && (
+                            <span className="text-zinc-300">
+                                {renderDtHighlights(rest)}
+                            </span>
+                        )}
+                    </div>
+                )
+            }
+            return (
+                <div key={`exp-body-${index}`} className="text-sm text-zinc-300">
+                    {renderDtHighlights(paragraph)}
+                </div>
+            )
+        })
     }
 
     return (
@@ -2858,6 +4339,11 @@ export default function CharacterSheet() {
                                         Testes de Resistência +{resistanceBonus}
                                     </div>
                                 )}
+                                {elementSpecialistChoice && (
+                                    <div className="mt-2 text-center text-sm text-zinc-300 font-text">
+                                        Resistir rituais ({formatEnum(elementSpecialistChoice)}) DT +2
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -2972,7 +4458,18 @@ export default function CharacterSheet() {
                         {/* Card Perícias */}
                         <div className="md:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
                             <div className="relative bg-black/60 rounded-md py-2 px-4 text-center">
-                                <h1 className="text-blue-400 font-smalltitle text-3xl">Perícias</h1>
+                                <div className="flex items-center justify-center gap-2">
+                                    <h1 className="text-blue-400 font-smalltitle text-3xl">Perícias</h1>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsExpertiseInfoOpen(true)}
+                                        className="text-blue-400 hover:text-blue-300 transition-colors"
+                                        title="Informações das perícias"
+                                        aria-label="Informações das perícias"
+                                    >
+                                        <Info size={18} />
+                                    </button>
+                                </div>
                                 <button
                                     type="button"
                                     onClick={openExpertiseEditModal}
@@ -3048,13 +4545,6 @@ export default function CharacterSheet() {
                                                                         Total: +{stats ? stats.total : "-"}
                                                                     </div>
                                                                 </div>
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                className="text-blue-400 hover:text-blue-300 transition-colors"
-                                                                title="Informações da perícia"
-                                                            >
-                                                                <Info size={16} />
                                                             </button>
                                                         </div>
                                                     )
@@ -3273,6 +4763,39 @@ export default function CharacterSheet() {
                                 </div>
                             )}
                         </div>
+
+                        {/* Card Rituais */}
+                        <div className="md:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <h1 className="text-blue-400 font-smalltitle text-2xl">Rituais</h1>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        openRitualPicker("manual")
+                                    }}
+                                    className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-black rounded flex items-center gap-2 font-text"
+                                >
+                                    <Plus size={16} />
+                                    Adicionar ritual
+                                </button>
+                            </div>
+                            {hasRitualCaster && (
+                                <div className="text-xs text-zinc-400 font-text">
+                                    Escolhido Pelo Outro Lado: círculo máximo {ritualCasterMaxCircle} (NEX {character.nex_total}%)
+                                    {ritualCasterExtraCount > 0 ? ` | Rituais bônus: ${ritualCasterExtraCount}` : ""}
+                                </div>
+                            )}
+                            {rituals.length === 0 && (
+                                <div className="text-zinc-300 font-text">
+                                    Nenhum ritual registrado.
+                                </div>
+                            )}
+                            {rituals.length > 0 && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {rituals.map(renderRitualItem)}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3319,6 +4842,18 @@ export default function CharacterSheet() {
                                 : "Sem perícias treinadas registradas."}
                         </span>
                     </div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-zinc-400 text-sm">
+                            {originAbilityLabels.length > 1
+                                ? "Habilidades de origem"
+                                : "Habilidade de origem"}
+                        </span>
+                        <span className="text-zinc-200">
+                            {originAbilityLabels.length > 0
+                                ? originAbilityLabels.join(", ")
+                                : "Sem habilidades de origem registradas."}
+                        </span>
+                    </div>
                 </div>
             </Modal>
             <Modal
@@ -3361,6 +4896,74 @@ export default function CharacterSheet() {
                             </div>
                         ))}
                     </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isExpertiseInfoOpen}
+                onClose={() => {
+                    setIsExpertiseInfoOpen(false)
+                    setExpandedExpertiseInfo(null)
+                }}
+                className="w-[min(100%-1.5rem,52rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Perícias</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsExpertiseInfoOpen(false)
+                            setExpandedExpertiseInfo(null)
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-3 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    {expertiseInfoList.map((name) => {
+                        const label = expertiseLabelMap[name] ?? formatEnum(name)
+                        const attributeKey = expertiseAttributeMap[name]
+                        const attributeLabel = attributeKey
+                            ? attributeLabelMap[attributeKey as keyof typeof attributeLabelMap]
+                                ?? formatEnum(attributeKey.replace("atrib_", ""))
+                            : ""
+                        const description =
+                            expertiseDescriptionMap[name] ?? "Descrição não disponível."
+                        const isOpen = expandedExpertiseInfo === name
+                        return (
+                            <div
+                                key={name}
+                                className="rounded-lg border border-zinc-700 bg-zinc-900/70"
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => setExpandedExpertiseInfo(isOpen ? null : name)}
+                                    className="w-full flex items-center justify-between gap-3 px-3 py-3 text-left"
+                                    aria-expanded={isOpen}
+                                >
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-white">{label}</span>
+                                        {attributeLabel && (
+                                            <span className="text-xs text-zinc-400">
+                                                Atributo: {attributeLabel}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <ChevronDown
+                                        className={`h-4 w-4 text-zinc-400 transition-transform ${
+                                            isOpen ? "rotate-180" : ""
+                                        }`}
+                                    />
+                                </button>
+                                {isOpen && (
+                                    <div className="px-3 pb-3 flex flex-col gap-2">
+                                        {renderExpertiseDescription(description)}
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    })}
                 </div>
             </Modal>
             <Modal
@@ -3561,6 +5164,163 @@ export default function CharacterSheet() {
                             {specialAttackTarget === "attack" ? "Preparar para teste" : "Preparar para dano"}
                         </button>
                     </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isElementSpecialistOpen}
+                onClose={() => setIsElementSpecialistOpen(false)}
+                className="w-[min(100%-1.5rem,26rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Especialista em Elemento</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsElementSpecialistOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Selecione um elemento para receber +2 na DT de resistir a rituais.
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {elementSpecialistOptions.map((option) => {
+                            const isSelected =
+                                elementSpecialistChoice
+                                && normalizeText(option.value) === normalizeText(elementSpecialistChoice)
+                            const style =
+                                elementSpecialistStyleMap[option.value] ?? elementSpecialistStyleMap.conhecimento
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => handleSelectElementSpecialist(option.value)}
+                                    className={`px-3 py-2 rounded border text-sm font-text transition-colors ${
+                                        isSelected ? style.selected : style.base
+                                    }`}
+                                >
+                                    {option.label}
+                                </button>
+                            )
+                        })}
+                    </div>
+                    {elementSpecialistChoice && (
+                        <div className="text-xs text-zinc-400">
+                            Selecionado: {formatEnum(elementSpecialistChoice)}
+                        </div>
+                    )}
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isElementMasterOpen}
+                onClose={() => setIsElementMasterOpen(false)}
+                className="w-[min(100%-1.5rem,26rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Mestre em Elemento</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsElementMasterOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Selecione um elemento para reduzir em 1 PE os rituais desse elemento.
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {elementSpecialistOptions.map((option) => {
+                            const isSelected =
+                                elementMasterChoice
+                                && normalizeText(option.value) === normalizeText(elementMasterChoice)
+                            const style =
+                                elementSpecialistStyleMap[option.value] ?? elementSpecialistStyleMap.conhecimento
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => handleSelectElementMaster(option.value)}
+                                    className={`px-3 py-2 rounded border text-sm font-text transition-colors ${
+                                        isSelected ? style.selected : style.base
+                                    }`}
+                                >
+                                    {option.label}
+                                </button>
+                            )
+                        })}
+                    </div>
+                    {elementMasterChoice && (
+                        <div className="text-xs text-zinc-400">
+                            Selecionado: {formatEnum(elementMasterChoice)}
+                        </div>
+                    )}
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isRitualPrediletoOpen}
+                onClose={() => setIsRitualPrediletoOpen(false)}
+                className="w-[min(100%-1.5rem,30rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Ritual Predileto</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsRitualPrediletoOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    <div className="text-zinc-200">
+                        Selecione um ritual conhecido para reduzir em 1 PE o custo de conjurá-lo.
+                    </div>
+                    {rituals.length === 0 && (
+                        <div className="text-sm text-zinc-400">
+                            Nenhum ritual disponível para selecionar.
+                        </div>
+                    )}
+                    {rituals.length > 0 && (
+                        <div className="flex flex-col gap-2">
+                            {rituals.map((ritual) => {
+                                const isSelected = ritualPrediletoId === ritual.id
+                                return (
+                                    <button
+                                        key={ritual.id}
+                                        type="button"
+                                        onClick={() => handleSelectRitualPredileto(ritual.id)}
+                                        className={`rounded border px-3 py-2 text-left text-sm transition-colors ${
+                                            isSelected
+                                                ? "border-emerald-500 bg-emerald-500/20 text-emerald-100"
+                                                : "border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:border-emerald-500/60"
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="font-text">{ritual.name}</span>
+                                            <span className="text-xs text-zinc-400">
+                                                Círculo {ritual.circle}
+                                            </span>
+                                        </div>
+                                        <div className="text-xs text-zinc-400">
+                                            {formatEnum(ritual.element)} | {formatEnum(ritual.execution)}
+                                        </div>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    )}
+                    {ritualPrediletoId && (
+                        <div className="text-xs text-zinc-400">
+                            Selecionado: {rituals.find((ritual) => ritual.id === ritualPrediletoId)?.name}
+                        </div>
+                    )}
                 </div>
             </Modal>
             <Modal
@@ -3975,6 +5735,334 @@ export default function CharacterSheet() {
                 </div>
             </Modal>
             <Modal
+                isOpen={isRitualPickerOpen}
+                onClose={() => {
+                    setIsRitualPickerOpen(false)
+                    setRitualSearch("")
+                    setRitualPickerMode("list")
+                    setRitualForm({ ...ritualFormDefaults })
+                    setRitualToEdit(null)
+                    setRitualPickerSource("manual")
+                }}
+                className="w-[min(100%-1.5rem,40rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">
+                        {ritualPickerMode === "edit"
+                            ? "Editar ritual"
+                            : ritualPickerMode === "custom"
+                                ? "Criar ritual"
+                                : "Adicionar ritual"}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsRitualPickerOpen(false)
+                            setRitualSearch("")
+                            setRitualPickerMode("list")
+                            setRitualForm({ ...ritualFormDefaults })
+                            setRitualToEdit(null)
+                            setRitualPickerSource("manual")
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    {ritualPickerSource === "ritual_caster" && hasRitualCaster && (
+                        <div className="rounded border border-amber-500/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-100">
+                            Escolhido Pelo Outro Lado: pode escolher {ritualCasterExtraCount} rituais bônus.
+                            {" "}Já possui {rituals.length}. Disponíveis: {ritualCasterRemainingCount}.
+                        </div>
+                    )}
+                    {ritualPickerMode !== "edit" && (
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setRitualPickerMode("list")}
+                                className={`px-3 py-2 rounded text-sm font-text border ${
+                                    ritualPickerMode === "list"
+                                        ? "bg-blue-500 border-blue-400 text-black"
+                                        : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                                }`}
+                            >
+                                Catálogo
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setRitualPickerMode("custom")
+                                    setRitualForm({ ...ritualFormDefaults })
+                                }}
+                                className={`px-3 py-2 rounded text-sm font-text border ${
+                                    ritualPickerMode === "custom"
+                                        ? "bg-blue-500 border-blue-400 text-black"
+                                        : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                                }`}
+                            >
+                                Ritual personalizado
+                            </button>
+                        </div>
+                    )}
+
+                    {ritualPickerMode === "list" && (
+                        <>
+                            <input
+                                type="text"
+                                value={ritualSearch}
+                                onChange={(e) => setRitualSearch(e.target.value)}
+                                placeholder="Buscar ritual..."
+                                className="w-full rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                            />
+                            {hasRitualCaster && (
+                                <div className="text-xs text-zinc-400">
+                                    Círculo máximo disponível: {ritualCasterMaxCircle} (NEX {character.nex_total}%).
+                                </div>
+                            )}
+                            {isRitualOptionsLoading && (
+                                <div className="text-zinc-300">Carregando rituais...</div>
+                            )}
+                            {!isRitualOptionsLoading && availableRituals.length === 0 && (
+                                <div className="text-zinc-300">
+                                    {ritualSearchTerm
+                                        ? "Nenhum ritual encontrado."
+                                        : "Nenhum ritual disponível para adicionar."}
+                                </div>
+                            )}
+                            {!isRitualOptionsLoading && availableRituals.length > 0 && (
+                                <div className="flex flex-col gap-3">
+                                    {availableRituals.map((ritual) => (
+                                        <div
+                                            key={ritual.id}
+                                            className="flex flex-col gap-2 border border-zinc-700 rounded-lg p-3 bg-zinc-900/70"
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex flex-col gap-1">
+                                                    {(() => {
+                                                        const normalizedElement = normalizeText(ritual.element ?? "")
+                                                        const ritualElementReduction =
+                                                            hasElementMaster
+                                                            && elementMasterChoice
+                                                            && normalizeText(elementMasterChoice) === normalizedElement
+                                                                ? 1
+                                                                : 0
+                                                        const ritualPrediletoReduction =
+                                                            hasRitualPredileto && ritualPrediletoId === ritual.id
+                                                                ? 1
+                                                                : 0
+                                                        const ritualRangeReduction =
+                                                            hasTatuagemRitualistica
+                                                            && normalizeText(ritual.ritual_range ?? "") === "pessoal"
+                                                                ? 1
+                                                                : 0
+                                                        const ritualCostReduction =
+                                                            ritualElementReduction
+                                                            + ritualPrediletoReduction
+                                                            + ritualRangeReduction
+                                                        const standardCost = applyRitualCostReduction(
+                                                            ritual.pe_cost_standard,
+                                                            ritualCostReduction
+                                                        )
+                                                        const discenteCost = applyRitualCostReduction(
+                                                            ritual.pe_cost_discente,
+                                                            ritualCostReduction
+                                                        )
+                                                        const verdadeiroCost = applyRitualCostReduction(
+                                                            ritual.pe_cost_verdadeiro,
+                                                            ritualCostReduction
+                                                        )
+                                                        return (
+                                                            <>
+                                                                <span className="text-white">{ritual.name}</span>
+                                                                <span className="text-xs text-zinc-400">
+                                                                    Círculo {ritual.circle} | {formatEnum(ritual.element)} |{" "}
+                                                                    {formatEnum(ritual.execution)}
+                                                                </span>
+                                                                <span className="text-xs text-zinc-400">
+                                                                    PE padrão {standardCost} | Discente{" "}
+                                                                    {discenteCost} | Verdadeiro{" "}
+                                                                    {verdadeiroCost}
+                                                                </span>
+                                                                {ritualCostReduction > 0 && (
+                                                                    <span className="text-[11px] text-emerald-200 flex flex-wrap gap-x-2">
+                                                                        {ritualElementReduction > 0 && (
+                                                                            <span>
+                                                                                Mestre em Elemento: -{ritualElementReduction} PE
+                                                                            </span>
+                                                                        )}
+                                                                        {ritualPrediletoReduction > 0 && (
+                                                                            <span>
+                                                                                Ritual Predileto: -{ritualPrediletoReduction} PE
+                                                                            </span>
+                                                                        )}
+                                                                        {ritualRangeReduction > 0 && (
+                                                                            <span>
+                                                                                Tatuagem Ritualística: -{ritualRangeReduction} PE
+                                                                            </span>
+                                                                        )}
+                                                                    </span>
+                                                                )}
+                                                            </>
+                                                        )
+                                                    })()}
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleAddRitual(ritual)}
+                                                    disabled={isAddingRitual}
+                                                    className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black rounded text-sm font-text"
+                                                >
+                                                    Adicionar
+                                                </button>
+                                            </div>
+                                            {ritual.description?.trim() && (
+                                                <div className="text-sm text-zinc-300">
+                                                    {ritual.description}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {(ritualPickerMode === "custom" || ritualPickerMode === "edit") && (
+                        <form
+                            className="flex flex-col gap-3"
+                            onSubmit={ritualPickerMode === "edit" ? handleUpdateRitual : handleCreateRitual}
+                        >
+                            <FloatingInput
+                                label="Nome do ritual"
+                                name="name"
+                                value={ritualForm.name}
+                                onChange={handleRitualInputChange}
+                                required
+                            />
+                            <textarea
+                                name="description"
+                                value={ritualForm.description}
+                                onChange={handleRitualTextAreaChange}
+                                placeholder="Descrição"
+                                className="w-full min-h-24 rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                                required
+                            />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <FloatingSelect
+                                    label="Círculo"
+                                    name="circle"
+                                    value={ritualForm.circle}
+                                    options={allowedRitualCircleOptions}
+                                    onChange={handleRitualSelectChange}
+                                />
+                                <FloatingSelect
+                                    label="Execução"
+                                    name="execution"
+                                    value={ritualForm.execution}
+                                    options={ritualExecutionOptions}
+                                    onChange={handleRitualSelectChange}
+                                />
+                                <FloatingSelect
+                                    label="Alcance"
+                                    name="ritual_range"
+                                    value={ritualForm.ritual_range}
+                                    options={ritualRangeOptions}
+                                    onChange={handleRitualSelectChange}
+                                />
+                                <FloatingSelect
+                                    label="Duração"
+                                    name="duration"
+                                    value={ritualForm.duration}
+                                    options={ritualDurationOptions}
+                                    onChange={handleRitualSelectChange}
+                                />
+                                <FloatingSelect
+                                    label="Elemento"
+                                    name="element"
+                                    value={ritualForm.element}
+                                    options={ritualElementOptions}
+                                    onChange={handleRitualSelectChange}
+                                />
+                            </div>
+                            {hasRitualCaster && (
+                                <div className="text-xs text-zinc-400">
+                                    Círculo máximo atual: {ritualCasterMaxCircle} (NEX {character.nex_total}%).
+                                </div>
+                            )}
+                            <textarea
+                                name="description_discente"
+                                value={ritualForm.description_discente}
+                                onChange={handleRitualTextAreaChange}
+                                placeholder="Descrição discente"
+                                className="w-full min-h-20 rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                                required
+                            />
+                            <textarea
+                                name="description_verdadeiro"
+                                value={ritualForm.description_verdadeiro}
+                                onChange={handleRitualTextAreaChange}
+                                placeholder="Descrição verdadeiro"
+                                className="w-full min-h-20 rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                                required
+                            />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <FloatingInput
+                                    label="PE Discente (extra)"
+                                    name="pe_cost_discente"
+                                    type="number"
+                                    value={ritualForm.pe_cost_discente}
+                                    onChange={handleRitualInputChange}
+                                    min={0}
+                                    step={1}
+                                    required
+                                />
+                                <FloatingInput
+                                    label="PE Verdadeiro (extra)"
+                                    name="pe_cost_verdadeiro"
+                                    type="number"
+                                    value={ritualForm.pe_cost_verdadeiro}
+                                    onChange={handleRitualInputChange}
+                                    min={0}
+                                    step={1}
+                                    required
+                                />
+                            </div>
+                            <div className="text-xs text-zinc-400">
+                                Custo padrão do círculo: {ritualStandardCost}. Total discente:{" "}
+                                {ritualDiscenteTotal}. Total verdadeiro: {ritualVerdadeiroTotal}.
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsRitualPickerOpen(false)
+                                        setRitualPickerMode("list")
+                                        setRitualForm({ ...ritualFormDefaults })
+                                        setRitualToEdit(null)
+                                    }}
+                                    className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isCreatingRitual}
+                                    className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                                >
+                                    {isCreatingRitual
+                                        ? "Salvando..."
+                                        : ritualPickerMode === "edit"
+                                            ? "Salvar alterações"
+                                            : "Criar ritual"}
+                                </button>
+                            </div>
+                        </form>
+                    )}
+                </div>
+            </Modal>
+            <Modal
                 isOpen={isRemoveConfirmOpen}
                 onClose={() => {
                     setIsRemoveConfirmOpen(false)
@@ -4083,6 +6171,64 @@ export default function CharacterSheet() {
                                 setWeaponToRemove(null)
                             }}
                             disabled={!weaponToRemove || removingWeaponId === weaponToRemove?.id}
+                            className="px-4 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                        >
+                            Remover
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isRitualRemoveConfirmOpen}
+                onClose={() => {
+                    setIsRitualRemoveConfirmOpen(false)
+                    setRitualToRemove(null)
+                }}
+                className="w-[min(100%-1.5rem,26rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Confirmar remoção</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsRitualRemoveConfirmOpen(false)
+                            setRitualToRemove(null)
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Remover o ritual{" "}
+                        <span className="text-white font-semibold">
+                            {ritualToRemove?.name ?? ""}
+                        </span>
+                        ?
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsRitualRemoveConfirmOpen(false)
+                                setRitualToRemove(null)
+                            }}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (ritualToRemove) {
+                                    handleRemoveRitual(ritualToRemove)
+                                }
+                                setIsRitualRemoveConfirmOpen(false)
+                                setRitualToRemove(null)
+                            }}
+                            disabled={!ritualToRemove || removingRitualId === ritualToRemove?.id}
                             className="px-4 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
                         >
                             Remover
@@ -4227,6 +6373,82 @@ export default function CharacterSheet() {
                             className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 text-black"
                         >
                             Usar (1 PE)
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isEnvoltoMisterioPromptOpen}
+                onClose={() => handleConfirmEnvoltoMisterio(false)}
+                className="w-[min(100%-1.5rem,24rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Envolto em Mistério</div>
+                    <button
+                        type="button"
+                        onClick={() => handleConfirmEnvoltoMisterio(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Usar Envolto em Mistério? (+5)
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmEnvoltoMisterio(false)}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Agora não
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmEnvoltoMisterio(true)}
+                            className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 text-black"
+                        >
+                            Usar (+5)
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isIdentificacaoParanormalPromptOpen}
+                onClose={() => handleConfirmIdentificacaoParanormal(false)}
+                className="w-[min(100%-1.5rem,24rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Identificação Paranormal</div>
+                    <button
+                        type="button"
+                        onClick={() => handleConfirmIdentificacaoParanormal(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Usar Identificação Paranormal? (+10)
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmIdentificacaoParanormal(false)}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Agora não
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmIdentificacaoParanormal(true)}
+                            className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 text-black"
+                        >
+                            Usar (+10)
                         </button>
                     </div>
                 </div>
@@ -4392,9 +6614,15 @@ export default function CharacterSheet() {
 
             <LevelUpResultModal 
                 diff={levelUpDiff}
-                onClose={() => setLevelUpDiff(null)}
+                onClose={() => {
+                    setLevelUpDiff(null)
+                    if (shouldOpenRitualAfterLevelUp) {
+                        setShouldOpenRitualAfterLevelUp(false)
+                        openRitualPicker("ritual_caster")
+                    }
+                }}
             />
-            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive || conhecimentoAplicadoActive || ecleticoActive || isTrilhaCertaPromptOpen) && (
+            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || ritualOutcomeToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive || conhecimentoAplicadoActive || ecleticoActive || isTrilhaCertaPromptOpen) && (
                 <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
                     {pendingSpecialAttack && (
                         <div className="min-w-[16rem] max-w-88 rounded-lg border border-red-500/40 bg-red-900/30 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
@@ -4431,6 +6659,11 @@ export default function CharacterSheet() {
                     {opportunityToast && (
                         <div className="min-w-[16rem] max-w-88 rounded-lg border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-amber-100 shadow-lg backdrop-blur">
                             <div className="text-sm font-text">{opportunityToast}</div>
+                        </div>
+                    )}
+                    {ritualOutcomeToast && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-rose-500/40 bg-rose-900/30 px-4 py-3 text-rose-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">{ritualOutcomeToast}</div>
                         </div>
                     )}
                     {defensiveCombatActive && (

@@ -38,6 +38,22 @@ export type WeaponSummary = {
     weapon_type?: string
 }
 
+export type RitualSummary = {
+    id: number
+    name: string
+    description: string
+    execution: string
+    ritual_range: string
+    duration: string
+    description_discente: string
+    description_verdadeiro: string
+    element: string
+    circle: number
+    pe_cost_standard: number
+    pe_cost_discente: number
+    pe_cost_verdadeiro: number
+}
+
 export type CharacterSummary = {
     id: number
     name: string
@@ -48,6 +64,7 @@ export type CharacterSummary = {
     abilities?: AbilitySummary[]
     proficiencies?: ProficiencySummary[]
     weapons?: WeaponSummary[]
+    rituals?: RitualSummary[]
 }
 
 export type CharacterDetails = CharacterSummary & {
