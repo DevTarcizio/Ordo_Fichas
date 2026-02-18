@@ -1,11 +1,13 @@
 ﻿import { Trash2 } from "lucide-react"
 import { useAuth } from "../contexts/useAuth"
 import { useNavigate } from "react-router-dom"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import { formatEnum } from "../utils"
 import type { CharacterSummary } from "../types/character"
+import CompactStatusBar from "../components/CompactStatusBar"
+import { statusConfigs, type StatusField, type StatusMaxField } from "../characterSheetConfig"
 
 const getOriginName = (origin: CharacterSummary["origin"]) => {
     if (!origin) return ""
@@ -16,10 +18,20 @@ const getOriginName = (origin: CharacterSummary["origin"]) => {
     return ""
 }
 
+const getStatusValue = (
+    character: CharacterSummary,
+    field: StatusField | StatusMaxField
+) => {
+    const value = character[field]
+    return typeof value === "number" ? value : 0
+}
+
 export default function Dashboard() {
     const { user, logout, isLoading } = useAuth()
     const navigate = useNavigate()
     const [characters, setCharacters] = useState<CharacterSummary[]>([])
+    const isFetchingRef = useRef(false)
+    const refreshTimerRef = useRef<number | null>(null)
 
     useEffect(() => {
         if (!user && !isLoading) {
@@ -27,27 +39,55 @@ export default function Dashboard() {
         }
     }, [navigate, user, isLoading])
 
+    const fetchCharacters = useCallback(async () => {
+        if (!user || isFetchingRef.current) return
+        isFetchingRef.current = true
+        try {
+            const response = await api.get("/characters/list")
+            const formattedCharacters = response.data.characters.map((char: CharacterSummary) => ({
+                ...char,
+                origin: formatEnum(getOriginName(char.origin)),
+                character_class: formatEnum(char.character_class),
+                rank: formatEnum(char.rank)
+            }))
+
+            setCharacters(formattedCharacters)
+        } catch (err) {
+            console.error("Erro ao buscar personagens: ", err)
+        } finally {
+            isFetchingRef.current = false
+        }
+    }, [user])
+
     useEffect(() => {
-        async function getCharacters() {
-            try {
-                if (!user) return
+        void fetchCharacters()
+    }, [fetchCharacters])
 
-                const response = await api.get("/characters/list")
-                const formattedCharacters = response.data.characters.map((char: CharacterSummary) => ({
-                    ...char,
-                    origin: formatEnum(getOriginName(char.origin)),
-                    character_class: formatEnum(char.character_class),
-                    rank: formatEnum(char.rank)
-                }))
+    useEffect(() => {
+        if (!user || user.role !== "master") return
 
-                setCharacters(formattedCharacters)
-            } catch (err) {
-                console.error("Erro ao buscar personagens: ", err)
-            }
+        const refresh = () => {
+            void fetchCharacters()
         }
 
-        getCharacters()
-    }, [user])
+        refreshTimerRef.current = window.setInterval(refresh, 10_000)
+        window.addEventListener("focus", refresh)
+
+        const handleVisibility = () => {
+            if (document.visibilityState === "visible") {
+                refresh()
+            }
+        }
+        document.addEventListener("visibilitychange", handleVisibility)
+
+        return () => {
+            if (refreshTimerRef.current) {
+                clearInterval(refreshTimerRef.current)
+            }
+            window.removeEventListener("focus", refresh)
+            document.removeEventListener("visibilitychange", handleVisibility)
+        }
+    }, [user, fetchCharacters])
 
     if (isLoading) {
         return null
@@ -107,7 +147,9 @@ export default function Dashboard() {
 
                                     <p className="text-zinc-300 font-text">Classe: {char.character_class}</p>
                                     <p className="text-zinc-300 font-text">Patente: {char.rank}</p>
-                                    <p className="text-zinc-300 font-text">Origem: {char.origin}</p>
+                                    <p className="text-zinc-300 font-text">
+                                        Origem: {formatEnum(getOriginName(char.origin)) || "Desconhecida"}
+                                    </p>
                                     <p className="text-zinc-300 font-text">Idade: {char.age}</p>
 
                                     <button
@@ -141,7 +183,67 @@ export default function Dashboard() {
 
     function renderMasterDashboard() {
         return (
-            <h1>oi mestre</h1>
+            <div className="w-full px-4 md:px-8 flex flex-col gap-6">
+                <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
+                    <h2 className="text-2xl text-blue-500 font-bigtitle">Status dos Personagens</h2>
+
+                    {characters.length === 0 ? (
+                        <p className="text-zinc-300 font-text">Não existem personagens criados</p>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                            {characters.map((char) => {
+                                const originLabel =
+                                    typeof char.origin === "string" && char.origin.trim().length > 0
+                                        ? char.origin
+                                        : "Desconhecida"
+
+                                return (
+                                    <div
+                                        key={char.id}
+                                        className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-3"
+                                    >
+                                        <div className="flex items-center justify-between gap-4 min-w-0">
+                                            <h3 className="flex-1 min-w-0 text-blue-400 font-smalltitle text-lg leading-5 h-10 clamp-2">
+                                                {char.name}
+                                            </h3>
+                                            <button
+                                                className="py-2 px-3 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-smalltitle transition"
+                                                onClick={() => navigate(`/characters/${char.id}`)}
+                                            >
+                                                Ver ficha
+                                            </button>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-2 text-zinc-300 font-text text-sm min-w-0">
+                                            <p className="min-w-0 leading-5 h-10 clamp-2">Classe: {char.character_class}</p>
+                                            <p className="min-w-0 leading-5 h-10 clamp-2">Patente: {char.rank}</p>
+                                            <p className="min-w-0 leading-5 h-10 clamp-2">Origem: {originLabel}</p>
+                                            <p className="min-w-0 leading-5 h-10 clamp-2">Idade: {char.age}</p>
+                                        </div>
+
+                                        <div className="flex flex-col gap-3">
+                                            {statusConfigs.map((status) => {
+                                                const current = getStatusValue(char, status.field)
+                                                const max = getStatusValue(char, status.maxField)
+
+                                                return (
+                                                    <CompactStatusBar
+                                                        key={`${char.id}-${status.field}`}
+                                                        current={current}
+                                                        max={max}
+                                                        icon={status.icon}
+                                                        gradient={status.gradient}
+                                                    />
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+            </div>
         )
     }
 
@@ -170,4 +272,3 @@ export default function Dashboard() {
         </MainLayout>
     )
 }
-

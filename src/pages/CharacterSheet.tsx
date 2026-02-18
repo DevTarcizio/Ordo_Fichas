@@ -1,5 +1,6 @@
-﻿import { useEffect, useState } from "react"
+﻿import { useCallback, useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { useRef } from "react"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import StatusBar from "../components/StatusBar"
@@ -8,6 +9,7 @@ import { formatEnum, reverseFormatEnum } from "../utils"
 import type {
     AbilitySummary,
     CharacterDetails,
+    ItemSummary,
     OriginSummary,
     ProficiencySummary,
     RitualSummary,
@@ -254,6 +256,73 @@ const isFirearmWeapon = (weapon: WeaponSummary) => {
     return type === "arma_de_fogo" || type === "arma de fogo"
 }
 
+const capitalizeFirst = (value: string) => (
+    value ? value.charAt(0).toUpperCase() + value.slice(1) : value
+)
+
+const getInventoryTotalSpace = (character: CharacterDetails) => {
+    const record = character as Record<string, unknown>
+    const candidates = [
+        "inventory_space",
+        "inventorySpace",
+        "inventory_capacity",
+        "inventoryCapacity",
+        "space_total",
+        "spaceTotal",
+        "space_max",
+        "spaceMax",
+        "carry_capacity",
+        "carryCapacity",
+        "space"
+    ]
+    for (const key of candidates) {
+        const value = record[key]
+        if (typeof value === "number" && Number.isFinite(value)) return value
+    }
+    return 0
+}
+
+const getEquipmentItems = (character: CharacterDetails) => {
+    const record = character as Record<string, unknown>
+    const raw =
+        Array.isArray(record.equipments) ? record.equipments
+        : Array.isArray(record.equipment) ? record.equipment
+        : Array.isArray(record.items) ? record.items
+        : []
+    return raw
+}
+
+const getEquipmentLabel = (item: unknown) => {
+    if (typeof item === "string") return item
+    if (!item || typeof item !== "object") return null
+    const record = item as Record<string, unknown>
+    if (typeof record.name === "string") return record.name
+    if (typeof record.label === "string") return record.label
+    if (typeof record.title === "string") return record.title
+    return null
+}
+
+const getEquipmentSpace = (item: unknown) => {
+    if (!item || typeof item !== "object") return 0
+    const record = item as Record<string, unknown>
+    const value = record.space ?? record.weight ?? record.size
+    return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+const getEquipmentId = (item: unknown, index: number) => {
+    if (!item || typeof item !== "object") return `equip-${index}`
+    const record = item as Record<string, unknown>
+    const rawId = record.id
+    if (typeof rawId === "number" || typeof rawId === "string") return rawId
+    return `equip-${index}`
+}
+
+type InventorySpaceState = {
+    used: number
+    max: number
+    available?: number
+}
+
 const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
     if (!origin) return ""
     if (typeof origin === "string") return origin
@@ -293,11 +362,45 @@ const getOriginInfo = (origin: CharacterDetails["origin"] | null | undefined): O
     }
 }
 
+type TrailInfo = {
+    id?: number
+    name: string
+    description?: string
+}
+
+const getTrailInfo = (trail: unknown): TrailInfo | null => {
+    if (!trail || typeof trail === "string") return null
+    if (typeof trail !== "object") return null
+    const record = trail as Record<string, unknown>
+    const name = typeof record.name === "string" ? record.name : ""
+    const description = typeof record.description === "string" ? record.description : undefined
+    if (!name && !description) return null
+    return {
+        id: typeof record.id === "number" ? record.id : undefined,
+        name,
+        description
+    }
+}
+
 const normalizeText = (value: string) =>
     value
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
+
+const getRequirementValue = (
+    requirements: AbilitySummary["requirements"],
+    reqType: string
+) => {
+    if (!Array.isArray(requirements)) return null
+    for (const entry of requirements) {
+        if (!entry || typeof entry !== "object") continue
+        const record = entry as Record<string, unknown>
+        if (record.type !== reqType) continue
+        return record.value
+    }
+    return null
+}
 
 const isRitualCasterAbility = (ability?: AbilitySummary | null) => {
     if (!ability) return false
@@ -400,6 +503,13 @@ const weaponFormDefaults = {
     space: "1",
     proficiency_required: "",
     weapon_type: ""
+}
+
+const itemFormDefaults = {
+    name: "",
+    description: "",
+    category: "",
+    space: "1"
 }
 
 const expertiseDescriptionMap: Partial<Record<string, string>> = {
@@ -792,6 +902,9 @@ export default function CharacterSheet() {
     const [pendingRitualOccultismTest, setPendingRitualOccultismTest] = useState<PendingRitualOccultismTest | null>(null)
     const [originInfo, setOriginInfo] = useState<OriginSummary | null>(null)
     const [isOriginInfoOpen, setIsOriginInfoOpen] = useState(false)
+    const [trailInfo, setTrailInfo] = useState<TrailInfo | null>(null)
+    const [isTrailInfoOpen, setIsTrailInfoOpen] = useState(false)
+    const trailLookupRef = useRef<string | null>(null)
     const [selectedAbility, setSelectedAbility] = useState<AbilitySummary | null>(null)
     const [isAbilityModalOpen, setIsAbilityModalOpen] = useState(false)
     const [abilityOptions, setAbilityOptions] = useState<AbilitySummary[]>([])
@@ -800,6 +913,7 @@ export default function CharacterSheet() {
     const [isAbilityOptionsLoading, setIsAbilityOptionsLoading] = useState(false)
     const [isAddingAbility, setIsAddingAbility] = useState(false)
     const [abilityTab, setAbilityTab] = useState<"active" | "passive">("active")
+    const [inventorySpace, setInventorySpace] = useState<InventorySpaceState | null>(null)
     const [isSpecialAttackModalOpen, setIsSpecialAttackModalOpen] = useState(false)
     const [specialAttackTarget, setSpecialAttackTarget] = useState<SpecialAttackTarget>("attack")
     const [specialAttackOption, setSpecialAttackOption] = useState<SpecialAttackOption | null>(null)
@@ -858,6 +972,19 @@ export default function CharacterSheet() {
     const [expandedWeaponIds, setExpandedWeaponIds] = useState<number[]>([])
     const [isWeaponRemoveConfirmOpen, setIsWeaponRemoveConfirmOpen] = useState(false)
     const [weaponToRemove, setWeaponToRemove] = useState<WeaponSummary | null>(null)
+    const [itemOptions, setItemOptions] = useState<ItemSummary[]>([])
+    const [itemSearch, setItemSearch] = useState("")
+    const [isItemPickerOpen, setIsItemPickerOpen] = useState(false)
+    const [isItemOptionsLoading, setIsItemOptionsLoading] = useState(false)
+    const [isAddingItem, setIsAddingItem] = useState(false)
+    const [itemPickerMode, setItemPickerMode] = useState<"list" | "custom" | "edit">("list")
+    const [itemForm, setItemForm] = useState(() => ({ ...itemFormDefaults }))
+    const [isCreatingItem, setIsCreatingItem] = useState(false)
+    const [itemToEdit, setItemToEdit] = useState<ItemSummary | null>(null)
+    const [expandedItemIds, setExpandedItemIds] = useState<Array<string | number>>([])
+    const [isItemRemoveConfirmOpen, setIsItemRemoveConfirmOpen] = useState(false)
+    const [itemToRemove, setItemToRemove] = useState<ItemSummary | null>(null)
+    const [removingItemId, setRemovingItemId] = useState<number | null>(null)
     const [ritualOptions, setRitualOptions] = useState<RitualSummary[]>([])
     const [ritualSearch, setRitualSearch] = useState("")
     const [isRitualPickerOpen, setIsRitualPickerOpen] = useState(false)
@@ -890,6 +1017,20 @@ export default function CharacterSheet() {
     } | null>(null)
     const token = localStorage.getItem("token")
 
+    const fetchInventorySpace = useCallback(async () => {
+        if (!id) return
+        try {
+            const response = await api.get(`/characters/${id}/inventory-space`)
+            setInventorySpace({
+                used: Number(response.data?.used) || 0,
+                max: Number(response.data?.max) || 0,
+                available: Number(response.data?.available)
+            })
+        } catch (err) {
+            console.error("Erro ao buscar espaço do inventário:", err)
+        }
+    }, [id])
+
     useEffect(() => {
         const fetchCharacter = async () => {
             try {
@@ -907,7 +1048,9 @@ export default function CharacterSheet() {
                 }
                 setCharacter(formattedCharacter)
                 setOriginInfo(getOriginInfo(response.data.origin))
+                setTrailInfo(getTrailInfo(response.data.trail))
                 setIsOriginInfoOpen(false)
+                setIsTrailInfoOpen(false)
             } catch (err) {
                 console.error(err)
                 alert("Erro ao buscar personagem")
@@ -916,6 +1059,51 @@ export default function CharacterSheet() {
 
         fetchCharacter()
     }, [id, token])
+
+    useEffect(() => {
+        if (!character) return
+        const trailKey = normalizeText(reverseFormatEnum(character.trail ?? ""))
+        if (!trailKey || trailKey === "none") {
+            setTrailInfo(null)
+            trailLookupRef.current = trailKey || "none"
+            return
+        }
+
+        const currentTrailKey = trailInfo?.name
+            ? normalizeText(reverseFormatEnum(trailInfo.name))
+            : ""
+        if (currentTrailKey && currentTrailKey === trailKey) return
+        if (trailLookupRef.current === trailKey) return
+
+        trailLookupRef.current = trailKey
+        let isMounted = true
+
+        api.get("/trails/")
+            .then((res) => {
+                const list = Array.isArray(res.data?.trails)
+                    ? res.data.trails
+                    : Array.isArray(res.data)
+                        ? res.data
+                        : []
+                const match = list.find(
+                    (trail: Record<string, unknown>) =>
+                        normalizeText(String(trail.name ?? "")) === trailKey
+                )
+                if (!isMounted) return
+                if (match) {
+                    setTrailInfo(getTrailInfo(match))
+                } else {
+                    setTrailInfo(null)
+                }
+            })
+            .catch((err) => {
+                console.error("Erro ao buscar trilha:", err)
+            })
+
+        return () => {
+            isMounted = false
+        }
+    }, [character, trailInfo])
 
     useEffect(() => {
         const fetchExpertise = async () => {
@@ -931,6 +1119,15 @@ export default function CharacterSheet() {
             fetchExpertise()
         }
     }, [id])
+
+    useEffect(() => {
+        void fetchInventorySpace()
+    }, [fetchInventorySpace])
+
+    useEffect(() => {
+        if (!character) return
+        void fetchInventorySpace()
+    }, [character, fetchInventorySpace])
 
     useEffect(() => {
         if (!isAbilityPickerOpen) return
@@ -983,6 +1180,32 @@ export default function CharacterSheet() {
             isMounted = false
         }
     }, [isWeaponPickerOpen])
+
+    useEffect(() => {
+        if (!isItemPickerOpen) return
+        let isMounted = true
+        setIsItemOptionsLoading(true)
+        api.get("/items/")
+            .then((res) => {
+                const list = Array.isArray(res.data?.items)
+                    ? res.data.items
+                    : Array.isArray(res.data)
+                        ? res.data
+                        : []
+                if (isMounted) setItemOptions(list)
+            })
+            .catch((err) => {
+                console.error(err)
+                if (isMounted) setItemOptions([])
+            })
+            .finally(() => {
+                if (isMounted) setIsItemOptionsLoading(false)
+            })
+
+        return () => {
+            isMounted = false
+        }
+    }, [isItemPickerOpen])
 
     useEffect(() => {
         if (!isRitualPickerOpen) return
@@ -1264,14 +1487,30 @@ export default function CharacterSheet() {
         setIsEditOpen(true)
     }
 
-    const maybeUpdateOriginInfo = (updatedCharacter: { origin?: CharacterDetails["origin"] }) => {
-        if (!Object.prototype.hasOwnProperty.call(updatedCharacter, "origin")) return
-        if (updatedCharacter.origin === null) {
-            setOriginInfo(null)
-            return
+    const maybeUpdateOriginInfo = (
+        updatedCharacter: { origin?: CharacterDetails["origin"]; trail?: unknown }
+    ) => {
+        if (Object.prototype.hasOwnProperty.call(updatedCharacter, "origin")) {
+            if (updatedCharacter.origin === null) {
+                setOriginInfo(null)
+            } else if (updatedCharacter.origin && typeof updatedCharacter.origin === "object") {
+                setOriginInfo(getOriginInfo(updatedCharacter.origin))
+            }
         }
-        if (updatedCharacter.origin && typeof updatedCharacter.origin === "object") {
-            setOriginInfo(getOriginInfo(updatedCharacter.origin))
+
+        if (Object.prototype.hasOwnProperty.call(updatedCharacter, "trail")) {
+            const trailValue = updatedCharacter.trail
+            if (trailValue === null) {
+                setTrailInfo(null)
+            } else if (trailValue && typeof trailValue === "object") {
+                setTrailInfo(getTrailInfo(trailValue))
+            } else if (typeof trailValue === "string") {
+                const nextKey = normalizeText(reverseFormatEnum(trailValue))
+                const currentKey = normalizeText(reverseFormatEnum(character?.trail ?? ""))
+                if (nextKey && nextKey !== currentKey) {
+                    setTrailInfo(null)
+                }
+            }
         }
     }
 
@@ -1926,7 +2165,7 @@ export default function CharacterSheet() {
         const bonus = bonusParts.reduce((sum, part) => sum + part.value, 0)
         const total = baseTotal + bonus
         setWeaponRollResult({
-            title: `${isCritical ? "Crítico" : "Dano"} - ${weapon.name}`,
+            title: `${isCritical ? "Crítico" : "Dano"} - ${capitalizeFirst(weapon.name)}`,
             formula: `${diceCount}d${parsed.diceSides}${bonus ? `+${bonus}` : ""}`,
             dice,
             total,
@@ -1972,6 +2211,16 @@ export default function CharacterSheet() {
     const handleWeaponTextAreaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const { name, value } = e.target
         setWeaponForm(prev => ({ ...prev, [name]: value }))
+    }
+
+    const handleItemInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target
+        setItemForm(prev => ({ ...prev, [name]: value }))
+    }
+
+    const handleItemTextAreaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const { name, value } = e.target
+        setItemForm(prev => ({ ...prev, [name]: value }))
     }
 
     const handleRitualInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2035,6 +2284,18 @@ export default function CharacterSheet() {
         })
         setWeaponPickerMode("edit")
         setIsWeaponPickerOpen(true)
+    }
+
+    const openItemEdit = (item: ItemSummary) => {
+        setItemToEdit(item)
+        setItemForm({
+            name: item.name ?? "",
+            description: item.description ?? "",
+            category: item.category ?? "",
+            space: String(item.space ?? 1)
+        })
+        setItemPickerMode("edit")
+        setIsItemPickerOpen(true)
     }
 
     const handleAddAbility = async (ability: AbilitySummary) => {
@@ -2196,6 +2457,92 @@ export default function CharacterSheet() {
         }
     }
 
+    const handleCreateItem = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        if (!character) return
+        setIsCreatingItem(true)
+        try {
+            const payload = {
+                name: itemForm.name.trim(),
+                description: itemForm.description.trim(),
+                category: itemForm.category.trim(),
+                space: Number(itemForm.space)
+            }
+
+            const createdResponse = await api.post("/items/", payload)
+            const createdItem = createdResponse.data as ItemSummary
+            setItemOptions(prev =>
+                [...prev, createdItem].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+            )
+
+            const response = await api.post(
+                `/characters/${character.id}/items/${createdItem.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+            setItemForm({ ...itemFormDefaults })
+            setItemSearch("")
+            setItemPickerMode("list")
+            setIsItemPickerOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao criar item personalizado")
+        } finally {
+            setIsCreatingItem(false)
+        }
+    }
+
+    const handleUpdateItem = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        if (!itemToEdit) return
+        setIsCreatingItem(true)
+        try {
+            const payload = {
+                name: itemForm.name.trim(),
+                description: itemForm.description.trim(),
+                category: itemForm.category.trim(),
+                space: Number(itemForm.space)
+            }
+            const response = await api.patch(`/items/${itemToEdit.id}`, payload)
+            const updatedItem = response.data as ItemSummary
+            setItemOptions(prev =>
+                prev
+                    .map((entry) => (entry.id === updatedItem.id ? updatedItem : entry))
+                    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+            )
+            setCharacter(prev => {
+                if (!prev) return prev
+                const nextItems = (prev.items ?? []).map((entry) =>
+                    entry.id === updatedItem.id ? updatedItem : entry
+                )
+                return { ...prev, items: nextItems }
+            })
+            setItemToEdit(null)
+            setItemForm({ ...itemFormDefaults })
+            setItemSearch("")
+            setItemPickerMode("list")
+            setIsItemPickerOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao editar item")
+        } finally {
+            setIsCreatingItem(false)
+        }
+    }
+
     const handleAddWeapon = async (weapon: WeaponSummary) => {
         if (!character) return
         setIsAddingWeapon(true)
@@ -2228,6 +2575,38 @@ export default function CharacterSheet() {
         }
     }
 
+    const handleAddItem = async (item: ItemSummary) => {
+        if (!character) return
+        setIsAddingItem(true)
+        try {
+            const response = await api.post(
+                `/characters/${character.id}/items/${item.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+            setIsItemPickerOpen(false)
+            setItemSearch("")
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao adicionar item")
+        } finally {
+            setIsAddingItem(false)
+        }
+    }
+
     const handleRemoveWeapon = async (weapon: WeaponSummary) => {
         if (!character) return
         if (weapon.id === UNARMED_WEAPON_ID) return
@@ -2256,6 +2635,36 @@ export default function CharacterSheet() {
             alert("Erro ao remover arma")
         } finally {
             setRemovingWeaponId(null)
+        }
+    }
+
+    const handleRemoveItem = async (item: ItemSummary) => {
+        if (!character) return
+        setRemovingItemId(item.id)
+        try {
+            const response = await api.delete(
+                `/characters/${character.id}/items/${item.id}`
+            )
+            const updated = response.data
+            setCharacter(prev => {
+                if (!prev) return prev
+                const merged = {
+                    ...prev,
+                    ...updated,
+                    origin: formatEnum(getOriginName(updated.origin ?? prev.origin)),
+                    character_class: formatEnum(updated.character_class ?? prev.character_class),
+                    subclass: formatEnum(updated.subclass ?? prev.subclass),
+                    trail: formatEnum(updated.trail ?? prev.trail),
+                    rank: formatEnum(updated.rank ?? prev.rank)
+                }
+                return merged
+            })
+            maybeUpdateOriginInfo(updated)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao remover item")
+        } finally {
+            setRemovingItemId(null)
         }
     }
 
@@ -2685,6 +3094,7 @@ export default function CharacterSheet() {
             })
         )
     )
+    const trailDescription = trailInfo?.description?.trim()
 
     if (!character) {
         return (
@@ -2700,6 +3110,7 @@ export default function CharacterSheet() {
         typeof character.origin === "string"
             ? character.origin
             : formatEnum(getOriginName(character.origin))
+    const trailLabel = character.trail || "Sem trilha"
     const abilities = (character.abilities ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
@@ -2712,6 +3123,19 @@ export default function CharacterSheet() {
             )
         ).sort((a, b) => a.localeCompare(b, "pt-BR"))
         : []
+    const trailKey = normalizeText(reverseFormatEnum(trailInfo?.name ?? character.trail ?? ""))
+    const trailAbilityDetails =
+        trailKey && trailKey !== "none"
+            ? abilities
+                .filter((ability) => ability.ability_type === "trail_power")
+                .filter((ability) => {
+                    const requirement = getRequirementValue(ability.requirements, "trail")
+                    if (requirement === null || requirement === undefined) return true
+                    const requirementKey = normalizeText(reverseFormatEnum(String(requirement)))
+                    return requirementKey === trailKey
+                })
+                .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+            : []
     const proficiencies = (character.proficiencies ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
@@ -2753,6 +3177,36 @@ export default function CharacterSheet() {
         weapon_type: "corpo_a_corpo"
     }
     const weapons = [unarmedWeapon, ...baseWeapons]
+    const equipmentItems = getEquipmentItems(character)
+    const equipmentEntries = equipmentItems
+        .map((item, index) => {
+            const name = getEquipmentLabel(item)
+            if (!name) return null
+            const record = item && typeof item === "object"
+                ? (item as Record<string, unknown>)
+                : null
+            const category = record && typeof record.category === "string" ? record.category : undefined
+            const description = record && typeof record.description === "string" ? record.description : undefined
+            return {
+                id: getEquipmentId(item, index),
+                name,
+                space: getEquipmentSpace(item),
+                category,
+                description
+            }
+        })
+        .filter((entry): entry is {
+            id: string | number
+            name: string
+            space: number
+            category?: string
+            description?: string
+        } => entry !== null)
+    const weaponsSpaceUsed = weapons.reduce((sum, weapon) => sum + (Number(weapon.space) || 0), 0)
+    const equipmentSpaceUsed = equipmentEntries.reduce((sum, item) => sum + item.space, 0)
+    const inventorySpaceUsed = inventorySpace?.used ?? (weaponsSpaceUsed + equipmentSpaceUsed)
+    const inventorySpaceTotal = inventorySpace?.max ?? getInventoryTotalSpace(character)
+    const inventorySpaceLabel = inventorySpaceTotal > 0 ? inventorySpaceTotal : "--"
     const rituals = (character.rituals ?? []).slice().sort((a, b) =>
         a.circle - b.circle || a.name.localeCompare(b.name, "pt-BR")
     )
@@ -2765,10 +3219,20 @@ export default function CharacterSheet() {
     const baseResistanceBonus = character.resistance_bonus ?? 0
     const assignedAbilityIds = new Set(abilities.map((ability) => ability.id))
     const assignedWeaponIds = new Set(baseWeapons.map((weapon) => weapon.id))
+    const assignedItemIds = new Set(
+        equipmentItems
+            .map((item) => {
+                if (!item || typeof item !== "object") return null
+                const record = item as Record<string, unknown>
+                return record.id
+            })
+            .filter((id): id is number => typeof id === "number")
+    )
     const assignedRitualIds = new Set(rituals.map((ritual) => ritual.id))
     const abilitySearchTerm = abilitySearch.trim().toLowerCase()
     const characterClassKey = reverseFormatEnum(character.character_class)
     const weaponSearchTerm = normalizeText(weaponSearch.trim())
+    const itemSearchTerm = normalizeText(itemSearch.trim())
     const ritualSearchTerm = normalizeText(ritualSearch.trim())
     const availableWeapons = weaponOptions
         .filter((weapon) => !assignedWeaponIds.has(weapon.id))
@@ -2778,6 +3242,15 @@ export default function CharacterSheet() {
                 `${weapon.name} ${weapon.category ?? ""} ${weapon.description ?? ""}`
             )
             return haystack.includes(weaponSearchTerm)
+        })
+    const availableItems = itemOptions
+        .filter((item) => !assignedItemIds.has(item.id))
+        .filter((item) => {
+            if (!itemSearchTerm) return true
+            const haystack = normalizeText(
+                `${item.name} ${item.category ?? ""} ${item.description ?? ""}`
+            )
+            return haystack.includes(itemSearchTerm)
         })
     const ritualCircleValue = clamp(toNumber(ritualForm.circle, 1), 1, 4)
     const ritualStandardCost = ritualStandardCostByCircle[ritualCircleValue] ?? 0
@@ -4200,8 +4673,19 @@ export default function CharacterSheet() {
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
-                                    <span className="text-zinc-300 font-text">Trilha</span>
-                                    <span className="text-white font-text text-lg">{character.trail}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-zinc-300 font-text">Trilha</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsTrailInfoOpen(true)}
+                                            className="text-blue-400 hover:text-blue-300 transition-colors"
+                                            title="Detalhes da trilha"
+                                            aria-label="Detalhes da trilha"
+                                        >
+                                            <Info size={16} />
+                                        </button>
+                                    </div>
+                                    <span className="text-white font-text text-lg">{trailLabel}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
@@ -4575,8 +5059,15 @@ export default function CharacterSheet() {
 
                         {/* Card Inventário */}
                         <div className="md:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
+                            <div className="flex items-center justify-between gap-3 flex-wrap">
+                                <h1 className="text-blue-400 font-smalltitle text-2xl">
+                                    Inventário ({inventorySpaceUsed}/{inventorySpaceLabel})
+                                </h1>
+                            </div>
                             <div className="flex items-center justify-between gap-3">
-                                <h1 className="text-blue-400 font-smalltitle text-2xl">Inventário</h1>
+                                <div className="text-zinc-300 font-text text-sm uppercase tracking-wide">
+                                    Arsenal
+                                </div>
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -4589,9 +5080,6 @@ export default function CharacterSheet() {
                                     <Plus size={16} />
                                     Adicionar arma
                                 </button>
-                            </div>
-                            <div className="text-zinc-300 font-text text-sm uppercase tracking-wide">
-                                Armas
                             </div>
                             {weapons.length === 0 && (
                                 <div className="text-zinc-300 font-text">
@@ -4656,7 +5144,7 @@ export default function CharacterSheet() {
                                                 <div className="flex items-center justify-between gap-2">
                                                     <div className="flex items-center gap-2">
                                                         <div className="text-white font-text text-lg">
-                                                            {weapon.name}
+                                                            {capitalizeFirst(weapon.name)}
                                                         </div>
                                                         <button
                                                             type="button"
@@ -4762,6 +5250,123 @@ export default function CharacterSheet() {
                                     })}
                                 </div>
                             )}
+                            <div className="flex items-center justify-between gap-3 mt-4">
+                                <div className="text-zinc-300 font-text text-sm uppercase tracking-wide">
+                                    Equipamentos
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setItemPickerMode("list")
+                                        setItemForm({ ...itemFormDefaults })
+                                        setItemSearch("")
+                                        setItemToEdit(null)
+                                        setIsItemPickerOpen(true)
+                                    }}
+                                    className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-black rounded flex items-center gap-2 font-text"
+                                >
+                                    <Plus size={16} />
+                                    Adicionar item
+                                </button>
+                            </div>
+                            {equipmentEntries.length === 0 ? (
+                                <div className="text-zinc-300 font-text">
+                                    Nenhum equipamento registrado.
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {equipmentEntries.map((item) => {
+                                        const isExpanded = expandedItemIds.includes(item.id)
+                                        const canManage = typeof item.id === "number"
+                                        const editPayload: ItemSummary = {
+                                            id: typeof item.id === "number" ? item.id : 0,
+                                            name: item.name,
+                                            description: item.description ?? "",
+                                            category: item.category ?? "",
+                                            space: item.space
+                                        }
+
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                className="w-full border border-blue-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
+                                            >
+                                                <div className="flex flex-col gap-2 px-4 pt-3 pb-0 border-b border-zinc-700/70">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="text-white font-text text-lg">
+                                                                {capitalizeFirst(item.name)}
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setExpandedItemIds((prev) =>
+                                                                        prev.includes(item.id)
+                                                                            ? prev.filter((id) => id !== item.id)
+                                                                            : [...prev, item.id]
+                                                                    )
+                                                                }}
+                                                                className="text-blue-400 hover:text-blue-300 transition-colors"
+                                                                title="Descrição do item"
+                                                                aria-label="Descrição do item"
+                                                            >
+                                                                {isExpanded
+                                                                    ? <EyeOff size={16} />
+                                                                    : <Eye size={16} />
+                                                                }
+                                                            </button>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (!canManage) return
+                                                                    openItemEdit(editPayload)
+                                                                }}
+                                                                disabled={!canManage}
+                                                                className="text-yellow-400 hover:text-yellow-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                title="Editar item"
+                                                                aria-label="Editar item"
+                                                            >
+                                                                <Pencil size={18} />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (!canManage) return
+                                                                    setItemToRemove(editPayload)
+                                                                    setIsItemRemoveConfirmOpen(true)
+                                                                }}
+                                                                disabled={!canManage}
+                                                                className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                title="Remover item"
+                                                                aria-label="Remover item"
+                                                            >
+                                                                <Trash2 size={18} />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    {isExpanded && (
+                                                        <div className="text-sm text-zinc-300 font-text">
+                                                            {item.description?.trim()
+                                                                ? item.description
+                                                                : "Descrição não disponível."}
+                                                        </div>
+                                                    )}
+                                                    <div className="-mx-4 w-[calc(100%+2rem)] flex flex-col text-sm text-zinc-300 font-text divide-y divide-zinc-700 border border-zinc-700/70 border-x-0 border-b-0 rounded-none overflow-hidden">
+                                                        <div className="px-4 py-2 text-left">
+                                                            Categoria: {item.category?.trim() ? formatEnum(item.category) : "-"}
+                                                        </div>
+                                                        <div className="px-4 py-2 text-left">
+                                                            Espaço: {item.space}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
                         </div>
 
                         {/* Card Rituais */}
@@ -4853,6 +5458,64 @@ export default function CharacterSheet() {
                                 ? originAbilityLabels.join(", ")
                                 : "Sem habilidades de origem registradas."}
                         </span>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isTrailInfoOpen}
+                onClose={() => setIsTrailInfoOpen(false)}
+                className="w-[min(100%-1.5rem,32rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Trilha</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsTrailInfoOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    <div className="text-lg text-white">{trailLabel}</div>
+                    <div className="flex flex-col gap-1">
+                        <span className="text-zinc-400 text-sm">Descrição</span>
+                        <span className="text-zinc-200">
+                            {trailDescription
+                                ? trailDescription
+                                : "Descrição da trilha não disponível."}
+                        </span>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        <span className="text-zinc-400 text-sm">
+                            {trailAbilityDetails.length > 1
+                                ? "Habilidades da trilha"
+                                : "Habilidade da trilha"}
+                        </span>
+                        {trailAbilityDetails.length > 0 ? (
+                            <div className="flex flex-col gap-3">
+                                {trailAbilityDetails.map((ability) => (
+                                    <div
+                                        key={ability.id}
+                                        className="rounded border border-zinc-700/70 bg-zinc-900/70 px-3 py-2"
+                                    >
+                                        <div className="text-zinc-100 font-text">
+                                            {ability.name}
+                                        </div>
+                                        <div className="text-zinc-300 text-sm whitespace-pre-wrap">
+                                            {ability.description?.trim()
+                                                ? ability.description.trim()
+                                                : "Descrição da habilidade não disponível."}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <span className="text-zinc-200">
+                                Sem habilidades de trilha registradas.
+                            </span>
+                        )}
                     </div>
                 </div>
             </Modal>
@@ -5494,7 +6157,7 @@ export default function CharacterSheet() {
                                         >
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex flex-col gap-1">
-                                                    <span className="text-white">{weapon.name}</span>
+                                                    <span className="text-white">{capitalizeFirst(weapon.name)}</span>
                                                     <span className="text-xs text-zinc-400">
                                                         {formatEnum(weapon.category)} | Dano {weapon.damage_formula} |{" "}
                                                         {formatEnum(weapon.weapon_range)} | Crítico {weapon.threat_margin}x{weapon.critical_multiplier}
@@ -5728,6 +6391,252 @@ export default function CharacterSheet() {
                                     className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
                                 >
                                     {isCreatingWeapon ? "Salvando..." : "Salvar alterações"}
+                                </button>
+                            </div>
+                        </form>
+                    )}
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isItemPickerOpen}
+                onClose={() => {
+                    setIsItemPickerOpen(false)
+                    setItemSearch("")
+                    setItemPickerMode("list")
+                    setItemForm({ ...itemFormDefaults })
+                    setItemToEdit(null)
+                }}
+                className="w-[min(100%-1.5rem,40rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">
+                        {itemPickerMode === "edit"
+                            ? "Editar item"
+                            : itemPickerMode === "custom"
+                                ? "Criar item"
+                                : "Adicionar item"}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsItemPickerOpen(false)
+                            setItemSearch("")
+                            setItemPickerMode("list")
+                            setItemForm({ ...itemFormDefaults })
+                            setItemToEdit(null)
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                    {itemPickerMode !== "edit" && (
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setItemPickerMode("list")
+                                    setItemToEdit(null)
+                                }}
+                                className={`px-3 py-2 rounded text-sm font-text border ${
+                                    itemPickerMode === "list"
+                                        ? "bg-blue-500 border-blue-400 text-black"
+                                        : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                                }`}
+                            >
+                                Catálogo
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setItemPickerMode("custom")
+                                    setItemForm({ ...itemFormDefaults })
+                                    setItemToEdit(null)
+                                }}
+                                className={`px-3 py-2 rounded text-sm font-text border ${
+                                    itemPickerMode === "custom"
+                                        ? "bg-blue-500 border-blue-400 text-black"
+                                        : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                                }`}
+                            >
+                                Item personalizado
+                            </button>
+                        </div>
+                    )}
+
+                    {itemPickerMode === "list" && (
+                        <>
+                            <input
+                                type="text"
+                                value={itemSearch}
+                                onChange={(e) => setItemSearch(e.target.value)}
+                                placeholder="Buscar item..."
+                                className="w-full rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                            />
+                            {isItemOptionsLoading && (
+                                <div className="text-zinc-300">Carregando itens...</div>
+                            )}
+                            {!isItemOptionsLoading && availableItems.length === 0 && (
+                                <div className="text-zinc-300">
+                                    {itemSearchTerm
+                                        ? "Nenhum item encontrado."
+                                        : "Nenhum item disponível para adicionar."}
+                                </div>
+                            )}
+                            {!isItemOptionsLoading && availableItems.length > 0 && (
+                                <div className="flex flex-col gap-3">
+                                    {availableItems.map((item) => (
+                                        <div
+                                            key={item.id}
+                                            className="flex flex-col gap-2 border border-zinc-700 rounded-lg p-3 bg-zinc-900/70"
+                                        >
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="text-white">{item.name}</span>
+                                                    <span className="text-xs text-zinc-400">
+                                                        {formatEnum(item.category)} | Espaço {item.space}
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleAddItem(item)}
+                                                    disabled={isAddingItem}
+                                                    className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black rounded text-sm font-text"
+                                                >
+                                                    Adicionar
+                                                </button>
+                                            </div>
+                                            {item.description?.trim() && (
+                                                <div className="text-sm text-zinc-300">
+                                                    {item.description}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {itemPickerMode === "custom" && (
+                        <form className="flex flex-col gap-3" onSubmit={handleCreateItem}>
+                            <FloatingInput
+                                label="Nome do item"
+                                name="name"
+                                value={itemForm.name}
+                                onChange={handleItemInputChange}
+                                required
+                            />
+                            <textarea
+                                name="description"
+                                value={itemForm.description}
+                                onChange={handleItemTextAreaChange}
+                                placeholder="Descrição"
+                                className="w-full min-h-24 rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                                required
+                            />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <FloatingInput
+                                    label="Categoria (ex: ferramenta)"
+                                    name="category"
+                                    value={itemForm.category}
+                                    onChange={handleItemInputChange}
+                                    required
+                                />
+                                <FloatingInput
+                                    label="Espaço"
+                                    name="space"
+                                    type="number"
+                                    value={itemForm.space}
+                                    onChange={handleItemInputChange}
+                                    min={0}
+                                    step={1}
+                                    required
+                                />
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsItemPickerOpen(false)
+                                        setItemSearch("")
+                                        setItemPickerMode("list")
+                                        setItemForm({ ...itemFormDefaults })
+                                        setItemToEdit(null)
+                                    }}
+                                    className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isCreatingItem}
+                                    className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                                >
+                                    {isCreatingItem ? "Salvando..." : "Criar item"}
+                                </button>
+                            </div>
+                        </form>
+                    )}
+
+                    {itemPickerMode === "edit" && (
+                        <form className="flex flex-col gap-3" onSubmit={handleUpdateItem}>
+                            <FloatingInput
+                                label="Nome do item"
+                                name="name"
+                                value={itemForm.name}
+                                onChange={handleItemInputChange}
+                                required
+                            />
+                            <textarea
+                                name="description"
+                                value={itemForm.description}
+                                onChange={handleItemTextAreaChange}
+                                placeholder="Descrição"
+                                className="w-full min-h-24 rounded border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-blue-400"
+                                required
+                            />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <FloatingInput
+                                    label="Categoria (ex: ferramenta)"
+                                    name="category"
+                                    value={itemForm.category}
+                                    onChange={handleItemInputChange}
+                                    required
+                                />
+                                <FloatingInput
+                                    label="Espaço"
+                                    name="space"
+                                    type="number"
+                                    value={itemForm.space}
+                                    onChange={handleItemInputChange}
+                                    min={0}
+                                    step={1}
+                                    required
+                                />
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsItemPickerOpen(false)
+                                        setItemSearch("")
+                                        setItemPickerMode("list")
+                                        setItemForm({ ...itemFormDefaults })
+                                        setItemToEdit(null)
+                                    }}
+                                    className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isCreatingItem}
+                                    className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                                >
+                                    {isCreatingItem ? "Salvando..." : "Salvar alterações"}
                                 </button>
                             </div>
                         </form>
@@ -6146,7 +7055,7 @@ export default function CharacterSheet() {
                     <div className="text-zinc-200">
                         Remover a arma{" "}
                         <span className="text-white font-semibold">
-                            {weaponToRemove?.name ?? ""}
+                            {weaponToRemove?.name ? capitalizeFirst(weaponToRemove.name) : ""}
                         </span>
                         ?
                     </div>
@@ -6171,6 +7080,64 @@ export default function CharacterSheet() {
                                 setWeaponToRemove(null)
                             }}
                             disabled={!weaponToRemove || removingWeaponId === weaponToRemove?.id}
+                            className="px-4 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                        >
+                            Remover
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
+                isOpen={isItemRemoveConfirmOpen}
+                onClose={() => {
+                    setIsItemRemoveConfirmOpen(false)
+                    setItemToRemove(null)
+                }}
+                className="w-[min(100%-1.5rem,26rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Confirmar remoção</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsItemRemoveConfirmOpen(false)
+                            setItemToRemove(null)
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Remover o item{" "}
+                        <span className="text-white font-semibold">
+                            {itemToRemove?.name ?? ""}
+                        </span>
+                        ?
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsItemRemoveConfirmOpen(false)
+                                setItemToRemove(null)
+                            }}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (itemToRemove) {
+                                    handleRemoveItem(itemToRemove)
+                                }
+                                setIsItemRemoveConfirmOpen(false)
+                                setItemToRemove(null)
+                            }}
+                            disabled={!itemToRemove || removingItemId === itemToRemove?.id}
                             className="px-4 py-2 rounded bg-red-500 hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
                         >
                             Remover

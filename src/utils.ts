@@ -1,4 +1,15 @@
-export function formatEnum(value: string): string {
+export function formatEnum(value: unknown): string {
+    if (typeof value !== "string") {
+        if (typeof value === "number" || typeof value === "boolean") {
+            return String(value)
+        }
+        if (value && typeof value === "object") {
+            const record = value as Record<string, unknown>
+            if (typeof record.name === "string") return formatEnum(record.name)
+            if (typeof record.label === "string") return formatEnum(record.label)
+        }
+        return ""
+    }
     if (!value) return ""
     const accentMap: Record<string, string> = {
         class_power: "Poder de Combatente",
@@ -45,6 +56,7 @@ export function formatEnum(value: string): string {
 }
 
 export function reverseFormatEnum(display: string): string {
+    if (typeof display !== "string") return ""
     return display
         .trim()
         .toLowerCase()

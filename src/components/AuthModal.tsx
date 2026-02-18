@@ -16,6 +16,15 @@ type ErrorPayload = {
     detail?: string
 }
 
+function extractToken(payload: unknown): string | null {
+    if (!payload || typeof payload !== "object") return null
+    const data = payload as Record<string, unknown>
+    const token = data.access_token ?? data.accessToken ?? data.token
+    if (typeof token !== "string") return null
+    const trimmed = token.trim()
+    return trimmed.length ? trimmed : null
+}
+
 export default function AuthModal({ isOpen, onClose, mode }: Props) {
     const isLogin = mode === "login"
 
@@ -51,7 +60,18 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
                 data = await register(username, email, password, role)
             }
 
-            loginContext(data.access_token)
+            let token = extractToken(data)
+            if (!token && !isLogin) {
+                const loginData = await login(email, password)
+                token = extractToken(loginData)
+            }
+
+            if (!token) {
+                setError("Não foi possível obter o token. Faça login para continuar.")
+                return
+            }
+
+            loginContext(token)
             onClose()
             navigate("/dashboard")
         } catch (err: unknown) {

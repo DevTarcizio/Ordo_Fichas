@@ -38,6 +38,14 @@ export type WeaponSummary = {
     weapon_type?: string
 }
 
+export type ItemSummary = {
+    id: number
+    name: string
+    description: string
+    category: string
+    space: number
+}
+
 export type RitualSummary = {
     id: number
     name: string
@@ -61,9 +69,18 @@ export type CharacterSummary = {
     character_class: string
     rank: string
     origin: string | OriginSummary | null
+    healthy_points?: number
+    healthy_max?: number
+    sanity_points?: number
+    sanity_max?: number
+    effort_points?: number
+    effort_max?: number
+    investigation_points?: number
+    investigation_max?: number
     abilities?: AbilitySummary[]
     proficiencies?: ProficiencySummary[]
     weapons?: WeaponSummary[]
+    items?: ItemSummary[]
     rituals?: RitualSummary[]
 }
 
