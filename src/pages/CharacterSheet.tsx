@@ -1,9 +1,7 @@
-﻿import { useCallback, useEffect, useState } from "react"
+﻿import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { useRef } from "react"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
-import StatusBar from "../components/StatusBar"
 import { ChevronDown, Eye, EyeOff, Info, Pencil, Plus, Trash2, X } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
 import type {
@@ -19,7 +17,6 @@ import CharacterEditModal from "../components/CharacterEditModal"
 import type { EditForm } from "../components/CharacterEditModal"
 import StatusEditModal from "../components/StatusEditModal"
 import type { StatusEditForm } from "../components/StatusEditModal"
-import AttributesCard from "../components/AttributesCard"
 import AttributesEditModal from "../components/AttributesEditModal"
 import type { AttributesEditForm } from "../components/AttributesEditModal"
 import FloatingInput from "../components/FloatingInput"
@@ -29,14 +26,17 @@ import ExpertiseEditModal from "../components/ExpertiseEditModal"
 import LevelUpModal from "../components/LevelUpModal"
 import LevelUpResultModal from "../components/LevelUpResultModal"
 import Modal from "../components/Modal"
+import StatusSection from "./characterSheet/sections/StatusSection"
+import AttributesSection from "./characterSheet/sections/AttributesSection"
+import ExpertiseSection from "./characterSheet/sections/ExpertiseSection"
+import InventorySection from "./characterSheet/sections/InventorySection"
+import RitualsSection from "./characterSheet/sections/RitualsSection"
 import {
     attributeKeyLabelMap,
     attributeLabelMap,
     expertiseAttributeMap,
     expertiseAttributeOrder,
     expertiseLabelMap,
-    getAvatarSrc,
-    statusConfigs,
     treinoColorClass,
     type StatusField,
     type StatusMaxField
@@ -72,6 +72,20 @@ type PendingRitualOccultismTest = {
     peCost: number
     dt: number
 }
+
+type PendingSaberPoder =
+    | {
+        kind: "expertise"
+        expertiseName: string
+        extraBonus?: { value: number; label?: string }
+        dicePenalty: number
+        options?: { successMin?: number; successLabel?: string }
+    }
+    | {
+        kind: "attribute"
+        attribute: keyof typeof attributeKeyLabelMap
+        value: number
+    }
 
 type SpecialAttackEffect = {
     options: SpecialAttackOption[]
@@ -368,6 +382,13 @@ type TrailInfo = {
     description?: string
 }
 
+type TrailAbilityDetail = {
+    ability: AbilitySummary
+    nexLabel: string
+    nexValue: number | null
+    isUnlocked: boolean
+}
+
 const getTrailInfo = (trail: unknown): TrailInfo | null => {
     if (!trail || typeof trail === "string") return null
     if (typeof trail !== "object") return null
@@ -387,6 +408,9 @@ const normalizeText = (value: string) =>
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
+
+const isIntellectExpertise = (name: string) =>
+    expertiseAttributeMap[normalizeText(name)] === "atrib_intellect"
 
 const getDefenseBonusFromItem = (name: string, category?: string) => {
     const haystack = normalizeText(`${name} ${category ?? ""}`)
@@ -430,6 +454,51 @@ const getRequirementValue = (
         return record.value
     }
     return null
+}
+
+const getNexRequirementInfo = (
+    ability: AbilitySummary,
+    currentNexClass: number,
+    currentNexTotal: number
+) => {
+    const labels: string[] = []
+    const values: number[] = []
+    let unlocked = true
+
+    const classValue = toFiniteNumber(getRequirementValue(ability.requirements, "nex_class_min"))
+    if (classValue !== null) {
+        labels.push(`NEX Classe ${classValue}%`)
+        values.push(classValue)
+        if (currentNexClass < classValue) unlocked = false
+    }
+
+    const totalValue = toFiniteNumber(getRequirementValue(ability.requirements, "nex_total_min"))
+    if (totalValue !== null) {
+        labels.push(`NEX Total ${totalValue}%`)
+        values.push(totalValue)
+        if (currentNexTotal < totalValue) unlocked = false
+    }
+
+    const genericValue = toFiniteNumber(getRequirementValue(ability.requirements, "nex_min"))
+    if (genericValue !== null) {
+        labels.push(`NEX ${genericValue}%`)
+        values.push(genericValue)
+        if (currentNexTotal < genericValue) unlocked = false
+    }
+
+    if (labels.length === 0) {
+        return {
+            nexLabel: "Sem requisito de NEX",
+            nexValue: null,
+            isUnlocked: true
+        }
+    }
+
+    return {
+        nexLabel: labels.join(" · "),
+        nexValue: values.length > 0 ? Math.min(...values) : null,
+        isUnlocked: unlocked
+    }
 }
 
 const isRitualCasterAbility = (ability?: AbilitySummary | null) => {
@@ -957,6 +1026,9 @@ export default function CharacterSheet() {
     const [sentidoTaticoActive, setSentidoTaticoActive] = useState(false)
     const [conhecimentoAplicadoActive, setConhecimentoAplicadoActive] = useState(false)
     const [ecleticoActive, setEcleticoActive] = useState(false)
+    const [saberPoderActive, setSaberPoderActive] = useState(false)
+    const [isSaberPoderPromptOpen, setIsSaberPoderPromptOpen] = useState(false)
+    const [pendingSaberPoder, setPendingSaberPoder] = useState<PendingSaberPoder | null>(null)
     const [isQuickHandsPromptOpen, setIsQuickHandsPromptOpen] = useState(false)
     const [isPrimeiraImpressaoPromptOpen, setIsPrimeiraImpressaoPromptOpen] = useState(false)
     const [pendingPrimeiraImpressao, setPendingPrimeiraImpressao] = useState<{
@@ -1160,7 +1232,8 @@ export default function CharacterSheet() {
     }, [character, fetchInventorySpace])
 
     useEffect(() => {
-        if (!isAbilityPickerOpen) return
+        if (!isAbilityPickerOpen && !isTrailInfoOpen) return
+        if (abilityOptions.length > 0) return
         let isMounted = true
         setIsAbilityOptionsLoading(true)
         api.get("/abilities/")
@@ -1183,7 +1256,7 @@ export default function CharacterSheet() {
         return () => {
             isMounted = false
         }
-    }, [isAbilityPickerOpen])
+    }, [isAbilityPickerOpen, isTrailInfoOpen, abilityOptions.length])
 
     useEffect(() => {
         if (!isWeaponPickerOpen) return
@@ -2022,8 +2095,32 @@ export default function CharacterSheet() {
         dicePenalty = 0,
         options?: { successMin?: number; successLabel?: string },
         skipEnvoltoMisterio = false,
-        skipIdentificacaoParanormal = false
+        skipIdentificacaoParanormal = false,
+        skipSaberPoder = false
     ) => {
+        const normalizedExpertise = normalizeText(expertiseName)
+        const shouldUseIntellect =
+            isIntellectExpertise(normalizedExpertise)
+            || (conhecimentoAplicadoActive && normalizedExpertise !== "luta" && normalizedExpertise !== "pontaria")
+        if (saberPoderActive && shouldUseIntellect) {
+            setSaberPoderActive(false)
+            extraBonus = mergeExtraBonus(extraBonus, { value: 5, label: "Saber é Poder" })
+        } else if (
+            !skipSaberPoder
+            && hasSaberPoder
+            && shouldUseIntellect
+            && currentEffort >= saberPoderCost
+        ) {
+            setPendingSaberPoder({
+                kind: "expertise",
+                expertiseName,
+                extraBonus,
+                dicePenalty,
+                options
+            })
+            setIsSaberPoderPromptOpen(true)
+            return
+        }
         const shouldSkipIdentificacaoParanormal =
             skipIdentificacaoParanormal
             || Boolean(options?.successLabel?.toLowerCase().includes("ritual"))
@@ -2071,10 +2168,16 @@ export default function CharacterSheet() {
         handleRollExpertise(expertiseName, extraBonus, dicePenalty, options)
     }
 
-    const handleRollAttribute = (attribute: keyof typeof attributeKeyLabelMap, value: number) => {
+    const performAttributeRoll = (
+        attribute: keyof typeof attributeKeyLabelMap,
+        value: number,
+        extraBonus?: { value: number; label?: string } | null
+    ) => {
         const diceCount = Math.max(0, value)
         const dice = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 20) + 1)
         const maxDie = dice.length ? Math.max(...dice) : 0
+        const bonusValue = extraBonus?.value ?? 0
+        const total = maxDie + bonusValue
 
         setIsTrilhaCertaPromptOpen(false)
         setRollResult({
@@ -2085,11 +2188,33 @@ export default function CharacterSheet() {
             dice,
             treino: 0,
             extra: 0,
-            bonus: 0,
-            total: maxDie
+            bonus: bonusValue,
+            total,
+            extra_bonus: bonusValue || undefined,
+            extra_label: extraBonus?.label
         })
         setIsRollOpen(true)
         setIsRolling(false)
+    }
+
+    const handleRollAttribute = (attribute: keyof typeof attributeKeyLabelMap, value: number) => {
+        if (attribute === "intellect") {
+            if (saberPoderActive) {
+                setSaberPoderActive(false)
+                performAttributeRoll(attribute, value, { value: 5, label: "Saber é Poder" })
+                return
+            }
+            if (hasSaberPoder && currentEffort >= saberPoderCost) {
+                setPendingSaberPoder({
+                    kind: "attribute",
+                    attribute,
+                    value
+                })
+                setIsSaberPoderPromptOpen(true)
+                return
+            }
+        }
+        performAttributeRoll(attribute, value)
     }
 
     const consumeSpecialAttack = (target: SpecialAttackTarget) => {
@@ -2949,6 +3074,11 @@ export default function CharacterSheet() {
             if (normalizeText(ability.name) === "ecletico") {
                 setEcleticoActive(false)
             }
+            if (normalizeText(ability.name) === "saber e poder") {
+                setPendingSaberPoder(null)
+                setIsSaberPoderPromptOpen(false)
+                setSaberPoderActive(false)
+            }
             if (normalizeText(ability.name) === "na trilha certa") {
                 setTrilhaCertaBonusDice(0)
                 setIsTrilhaCertaPromptOpen(false)
@@ -3154,9 +3284,9 @@ export default function CharacterSheet() {
         ).sort((a, b) => a.localeCompare(b, "pt-BR"))
         : []
     const trailKey = normalizeText(reverseFormatEnum(trailInfo?.name ?? character.trail ?? ""))
-    const trailAbilityDetails =
+    const trailAbilityDetails: TrailAbilityDetail[] =
         trailKey && trailKey !== "none"
-            ? abilities
+            ? (abilityOptions.length > 0 ? abilityOptions : abilities)
                 .filter((ability) => ability.ability_type === "trail_power")
                 .filter((ability) => {
                     const requirement = getRequirementValue(ability.requirements, "trail")
@@ -3164,7 +3294,16 @@ export default function CharacterSheet() {
                     const requirementKey = normalizeText(reverseFormatEnum(String(requirement)))
                     return requirementKey === trailKey
                 })
-                .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+                .map((ability) => ({
+                    ability,
+                    ...getNexRequirementInfo(ability, character.nex_class, character.nex_total)
+                }))
+                .sort((a, b) => {
+                    const aNex = a.nexValue ?? -1
+                    const bNex = b.nexValue ?? -1
+                    if (aNex !== bNex) return aNex - bNex
+                    return a.ability.name.localeCompare(b.ability.name, "pt-BR")
+                })
             : []
     const proficiencies = (character.proficiencies ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
@@ -3241,9 +3380,9 @@ export default function CharacterSheet() {
     const inventorySpaceUsed = inventorySpace?.used ?? (weaponsSpaceUsed + equipmentSpaceUsed)
     const inventorySpaceTotal = inventorySpace?.max ?? getInventoryTotalSpace(character)
     const inventorySpaceLabel = inventorySpaceTotal > 0 ? inventorySpaceTotal : "--"
-    const rituals = (character.rituals ?? []).slice().sort((a, b) =>
-        a.circle - b.circle || a.name.localeCompare(b.name, "pt-BR")
-    )
+    const rituals = (character.rituals ?? [])
+        .slice()
+        .sort((a, b) => a.circle - b.circle || a.name.localeCompare(b.name, "pt-BR"))
     const trainedExpertise = new Set(
         Object.entries(expertise ?? {})
             .filter(([, stats]) => (stats?.treino ?? 0) > 0)
@@ -3322,6 +3461,9 @@ export default function CharacterSheet() {
     )
     const hasTatuagemRitualistica = abilities.some(
         (ability) => isTatuagemRitualisticaName(ability.name)
+    )
+    const hasSaberPoder = abilities.some(
+        (ability) => normalizeText(ability.name) === "saber e poder"
     )
     const ritualCasterAbility = abilities.find(isRitualCasterAbility)
     const ritualCasterEffect = parseRitualCasterEffect(ritualCasterAbility?.effect ?? null)
@@ -3476,6 +3618,8 @@ export default function CharacterSheet() {
     }
     const availableAbilities = abilityOptions
         .filter((ability) => ability.origin_id == null)
+        .filter((ability) => ability.ability_type !== "trail_power")
+        .filter((ability) => getRequirementValue(ability.requirements, "trail") == null)
         .filter((ability) => !assignedAbilityIds.has(ability.id))
         .filter((ability) => {
             if (!ability.class_name) return false
@@ -3566,6 +3710,7 @@ export default function CharacterSheet() {
     const sentidoTaticoCost = 2
     const conhecimentoAplicadoCost = 2
     const ecleticoCost = 2
+    const saberPoderCost = 2
     const sentidoTaticoBonus = sentidoTaticoActive ? Number(character.atrib_intellect) || 0 : 0
     const defenseBonus =
         (defensiveCombatActive ? 5 : 0) + sentidoTaticoBonus + defenseItemBonus
@@ -3710,6 +3855,26 @@ export default function CharacterSheet() {
         setEcleticoActive(false)
     }
 
+    const handleActivateSaberPoder = () => {
+        if (saberPoderActive) return
+        if (saberPoderCost > currentEffort) {
+            alert("PE insuficiente para Saber é Poder.")
+            return
+        }
+        if (saberPoderCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -saberPoderCost)
+        }
+        setSaberPoderActive(true)
+    }
+
+    const handleCancelSaberPoder = () => {
+        if (!saberPoderActive) return
+        if (saberPoderCost > 0) {
+            handleStatusChange("effort_points", "effort_max", saberPoderCost)
+        }
+        setSaberPoderActive(false)
+    }
+
     const handleActivateDemolishingStrike = () => {
         if (pendingDemolishingStrike) return
         if (demolishingStrikeCost > currentEffort) {
@@ -3805,7 +3970,7 @@ export default function CharacterSheet() {
         if (nerdCost > 0) {
             handleStatusChange("effort_points", "effort_max", -nerdCost)
         }
-        handleRollExpertise("atualidades", undefined, 0, {
+        requestRollExpertise("atualidades", undefined, 0, {
             successMin: 20,
             successLabel: "Nerd"
         })
@@ -3842,6 +4007,45 @@ export default function CharacterSheet() {
         )
     }
 
+    const handleConfirmSaberPoder = (applyBonus: boolean) => {
+        const pending = pendingSaberPoder
+        if (!pending) {
+            setIsSaberPoderPromptOpen(false)
+            return
+        }
+        if (applyBonus && saberPoderCost > currentEffort) {
+            alert("PE insuficiente para Saber é Poder.")
+            setIsSaberPoderPromptOpen(false)
+            setPendingSaberPoder(null)
+            return
+        }
+        if (applyBonus && saberPoderCost > 0) {
+            handleStatusChange("effort_points", "effort_max", -saberPoderCost)
+        }
+        setIsSaberPoderPromptOpen(false)
+        setPendingSaberPoder(null)
+
+        const bonus = applyBonus
+            ? { value: 5, label: "Saber é Poder" }
+            : undefined
+
+        if (pending.kind === "attribute") {
+            performAttributeRoll(pending.attribute, pending.value, bonus)
+            return
+        }
+
+        const updatedBonus = bonus ? mergeExtraBonus(pending.extraBonus, bonus) : pending.extraBonus
+        requestRollExpertise(
+            pending.expertiseName,
+            updatedBonus,
+            pending.dicePenalty,
+            pending.options,
+            false,
+            false,
+            true
+        )
+    }
+
     const handleConfirmEnvoltoMisterio = (applyBonus: boolean) => {
         const pending = pendingEnvoltoMisterio
         if (!pending) {
@@ -3861,6 +4065,8 @@ export default function CharacterSheet() {
             updatedBonus,
             pending.dicePenalty,
             pending.options,
+            true,
+            false,
             true
         )
     }
@@ -3885,6 +4091,7 @@ export default function CharacterSheet() {
             pending.dicePenalty,
             pending.options,
             false,
+            true,
             true
         )
     }
@@ -4129,6 +4336,7 @@ export default function CharacterSheet() {
         const isSentidoTatico = normalizeText(ability.name) === "sentido tatico"
         const isConhecimentoAplicado = normalizeText(ability.name) === "conhecimento aplicado"
         const isEcletico = normalizeText(ability.name) === "ecletico"
+        const isSaberPoder = normalizeText(ability.name) === "saber e poder"
         const isSuppressiveFire = normalizeText(ability.name) === "tiro de cobertura"
         const isCamuflarOcultismo = normalizeText(ability.name) === "camuflar ocultismo"
         const isGuiadoParanormal = normalizeText(ability.name) === "guiado pelo paranormal"
@@ -4155,6 +4363,7 @@ export default function CharacterSheet() {
             || isSentidoTatico
             || isConhecimentoAplicado
             || isEcletico
+            || isSaberPoder
             || isSuppressiveFire
             || isCamuflarOcultismo
             || isGuiadoParanormal
@@ -4193,9 +4402,11 @@ export default function CharacterSheet() {
                                 ? Math.max(conhecimentoAplicadoCost, basePeCost)
                                 : isEcletico
                                     ? Math.max(ecleticoCost, basePeCost)
-                                    : isSuppressiveFire
-                                        ? Math.max(suppressiveFireCost, basePeCost)
-                                        : basePeCost
+                                    : isSaberPoder
+                                        ? Math.max(saberPoderCost, basePeCost)
+                                        : isSuppressiveFire
+                                            ? Math.max(suppressiveFireCost, basePeCost)
+                                            : basePeCost
         const isAbilityActive = ability.is_active || isDemolishingStrike
         const metaParts = [isAbilityActive ? "Ativa" : "Passiva"]
         if (isNaTrilhaCerta) {
@@ -4257,6 +4468,8 @@ export default function CharacterSheet() {
                                     ? handleActivateConhecimentoAplicado
                                         : isEcletico
                                             ? handleActivateEcletico
+                                            : isSaberPoder
+                                                ? handleActivateSaberPoder
                                             : isDemolishingStrike
                                                 ? handleActivateDemolishingStrike
                                                 : isTireless
@@ -4307,6 +4520,8 @@ export default function CharacterSheet() {
                             handleActivateConhecimentoAplicado()
                         } else if (isEcletico) {
                             handleActivateEcletico()
+                        } else if (isSaberPoder) {
+                            handleActivateSaberPoder()
                         } else if (isDemolishingStrike) {
                             handleActivateDemolishingStrike()
                         } else if (isTireless) {
@@ -4637,6 +4852,354 @@ export default function CharacterSheet() {
         })
     }
 
+    const avatarMarkSrc = `/avatars/${character.avatar}/mark.png`
+
+    const expertiseColumns = expertiseAttributeOrder.map((attr, index) => {
+        const items = Object.keys(expertiseAttributeMap)
+            .filter((name) => expertiseAttributeMap[name] === attr)
+            .sort((a, b) => {
+                const aStats = getEffectiveExpertiseStats(a, expertise?.[a])
+                const bStats = getEffectiveExpertiseStats(b, expertise?.[b])
+                const treinoDiff = (bStats?.treino ?? 0) - (aStats?.treino ?? 0)
+                if (treinoDiff !== 0) return treinoDiff
+                const extraDiff = (bStats?.extra ?? 0) - (aStats?.extra ?? 0)
+                if (extraDiff !== 0) return extraDiff
+                const aLabel = expertiseLabelMap[a] ?? formatEnum(a)
+                const bLabel = expertiseLabelMap[b] ?? formatEnum(b)
+                return aLabel.localeCompare(bLabel, "pt-BR")
+            })
+        return (
+            <div
+                key={attr}
+                className={`flex flex-col gap-2 px-3 ${index === 0 ? "" : "border-l-2 border-zinc-500"}`}
+            >
+                <div className="text-lg text-blue-300 font-smalltitle text-center">
+                    {attributeLabelMap[attr] ?? formatEnum(attr.replace("atrib_", ""))}
+                </div>
+                <div className="flex flex-col gap-2">
+                    {items.map((name) => {
+                        const stats = getEffectiveExpertiseStats(name, expertise?.[name])
+                        return (
+                            <div
+                                key={name}
+                                className="flex items-center gap-2"
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const isResistance = resistanceExpertiseSet.has(name)
+                                        const bonusValue =
+                                            sentidoTaticoActive && isResistance
+                                                ? Number(character.atrib_intellect) || 0
+                                                : 0
+                                        requestRollExpertise(
+                                            name,
+                                            bonusValue > 0
+                                                ? {
+                                                    value: bonusValue,
+                                                    label: "Sentido Tático (Intelecto)"
+                                                }
+                                                : undefined
+                                        )
+                                    }}
+                                    className="flex-1 bg-zinc-900/70 border border-zinc-700 rounded p-2 text-left hover:border-blue-500 transition-colors"
+                                    title="Rolar perícia"
+                                >
+                                    <div className="flex items-start justify-between gap-2 font-text">
+                                        <div className="flex flex-col gap-1">
+                                            <div className={`text-base font-sans ${treinoColorClass(stats?.treino, stats?.extra)}`}>
+                                                {expertiseLabelMap[name] ?? formatEnum(name)}
+                                            </div>
+                                            <div className="text-sm text-zinc-400 flex flex-col">
+                                                <span>Treino: {stats ? stats.treino : "-"}</span>
+                                                <span>Extra: {stats ? stats.extra : "-"}</span>
+                                            </div>
+                                        </div>
+                                        <div className="text-base text-zinc-300 whitespace-nowrap">
+                                            Total: +{stats ? stats.total : "-"}
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+        )
+    })
+
+    const weaponCards = weapons.map((weapon) => {
+        const isUnarmedWeapon = weapon.id === UNARMED_WEAPON_ID
+        const effectiveDamageFormula =
+            weapon.id === UNARMED_WEAPON_ID
+                ? getUnarmedDamageFormula(character.nex_total, hasArtistaMarcial)
+                : weapon.damage_formula
+        const specialAttackAttackBonus =
+            pendingSpecialAttack?.target === "attack"
+                ? pendingSpecialAttack.bonus
+                : 0
+        const specialAttackDamageBonus =
+            pendingSpecialAttack?.target === "damage"
+                ? pendingSpecialAttack.bonus
+                : 0
+        const damageFormulaParsed = parseDamageFormula(
+            effectiveDamageFormula
+        )
+        const demolishingStrikeLabel =
+            pendingDemolishingStrike && damageFormulaParsed
+                ? `+2d${damageFormulaParsed.diceSides}`
+                : ""
+        const golpePesadoLabel =
+            hasGolpePesado
+            && weapon.weapon_range === "corpo_a_corpo"
+            && damageFormulaParsed
+                ? `+1d${damageFormulaParsed.diceSides}`
+                : ""
+        const firearmDamageBonus =
+            hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo"
+                ? Number(character.atrib_agility) || 0
+                : 0
+        const ninjaUrbanoDamageBonus =
+            hasNinjaUrbano && isTacticalWeapon(weapon) && !isFirearmWeapon(weapon)
+                ? 2
+                : 0
+        const tacticalDamageBonus =
+            hasBalisticaAvancada && isTacticalWeapon(weapon) ? 2 : 0
+        const damageBonusLabel = formatSignedBonus(
+            firearmDamageBonus
+            + specialAttackDamageBonus
+            + tacticalDamageBonus
+            + ninjaUrbanoDamageBonus
+        )
+        const extraDiceLabel = [demolishingStrikeLabel, golpePesadoLabel]
+            .filter(Boolean)
+            .join("")
+        const damageExtraLabel = `${extraDiceLabel}${damageBonusLabel}`
+        return (
+            <div
+                key={weapon.id}
+                className="w-full border border-red-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
+            >
+                <div className="flex flex-col gap-3 px-4 pt-3 pb-0 border-b border-zinc-700/70">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <div className="text-white font-text text-lg">
+                                {capitalizeFirst(weapon.name)}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setExpandedWeaponIds((prev) =>
+                                        prev.includes(weapon.id)
+                                            ? prev.filter((id) => id !== weapon.id)
+                                            : [...prev, weapon.id]
+                                    )
+                                }}
+                                className="text-blue-400 hover:text-blue-300 transition-colors"
+                                title="Descrição da arma"
+                                aria-label="Descrição da arma"
+                            >
+                                {expandedWeaponIds.includes(weapon.id)
+                                    ? <EyeOff size={16} />
+                                    : <Eye size={16} />
+                                }
+                            </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => openWeaponEdit(weapon)}
+                                disabled={isUnarmedWeapon}
+                                className="text-yellow-400 hover:text-yellow-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={isUnarmedWeapon ? "Arma desarmada não pode ser editada" : "Editar arma"}
+                                aria-label="Editar arma"
+                            >
+                                <Pencil size={18} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (isUnarmedWeapon) return
+                                    setWeaponToRemove(weapon)
+                                    setIsWeaponRemoveConfirmOpen(true)
+                                }}
+                                disabled={isUnarmedWeapon}
+                                className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={isUnarmedWeapon ? "Arma desarmada não pode ser removida" : "Remover arma"}
+                                aria-label="Remover arma"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        </div>
+                    </div>
+                    {expandedWeaponIds.includes(weapon.id) && (
+                        <div className="text-sm text-zinc-300 font-text">
+                            {weapon.description?.trim()
+                                ? weapon.description
+                                : "Descrição não disponível."}
+                        </div>
+                    )}
+                    <div className="-mx-4 w-[calc(100%+2rem)] flex flex-col text-sm text-zinc-300 font-text divide-y divide-zinc-700 border border-zinc-700/70 border-x-0 border-b-0 rounded-none overflow-hidden">
+                        <div className="px-4 py-2 text-left">
+                            Categoria: {formatEnum(weapon.category)}
+                        </div>
+                        <div className="px-4 py-2 text-left">
+                            Alcance: {formatEnum(weapon.weapon_range)}
+                        </div>
+                        <div className="px-4 py-2 text-left">
+                            Margem: {weapon.threat_margin}
+                        </div>
+                    </div>
+                </div>
+                <div className="grid grid-cols-3 text-sm text-zinc-200">
+                    <button
+                        type="button"
+                        onClick={() => handleWeaponTestRoll(weapon)}
+                        className="py-2 border-r border-zinc-700 hover:bg-zinc-800 transition-colors font-text flex flex-col items-center leading-tight text-blue-300"
+                    >
+                        <span>Teste</span>
+                        <span className="text-xs text-blue-200">
+                            {getWeaponTestFormula(weapon, specialAttackAttackBonus)}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleWeaponDamageRoll(weapon, false)}
+                        className="py-2 border-r border-zinc-700 hover:bg-zinc-800 transition-colors font-text text-red-300 flex flex-col items-center leading-tight"
+                    >
+                        <span>Normal</span>
+                        <span className="text-xs text-red-200">
+                            {effectiveDamageFormula}
+                            {damageExtraLabel}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handleWeaponDamageRoll(weapon, true)}
+                        className="py-2 hover:bg-zinc-800 transition-colors font-text text-red-400 flex flex-col items-center leading-tight"
+                    >
+                        <span>Crítico</span>
+                        <span className="text-xs text-red-300">
+                            {getCriticalDamageLabel(weapon, effectiveDamageFormula)}
+                            {damageExtraLabel}
+                        </span>
+                    </button>
+                </div>
+            </div>
+        )
+    })
+
+    const itemCards = equipmentEntries.map((item) => {
+        const isExpanded = expandedItemIds.includes(item.id)
+        const canManage = typeof item.id === "number"
+        const itemElement = getRitualItemElement(item.name, item.category)
+        const elementStyles = itemElement
+            ? ritualElementStyleMap[itemElement] ?? ritualElementStyleMap.default
+            : null
+        const elementIcon = itemElement ? ritualElementIconMap[itemElement] : null
+        const editPayload: ItemSummary = {
+            id: typeof item.id === "number" ? item.id : 0,
+            name: item.name,
+            description: item.description ?? "",
+            category: item.category ?? "",
+            space: item.space
+        }
+
+        return (
+            <div
+                key={item.id}
+                className={
+                    elementStyles
+                        ? `w-full border rounded-lg overflow-hidden ${elementStyles.card}`
+                        : "w-full border border-blue-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
+                }
+            >
+                <div className="flex flex-col gap-2 px-4 pt-3 pb-0 border-b border-zinc-700/70">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            {elementIcon && (
+                                <div className="h-10 w-10 rounded-full bg-black/40 border border-zinc-700/60 flex items-center justify-center">
+                                    <img
+                                        src={elementIcon}
+                                        alt={`Símbolo de ${formatEnum(itemElement ?? "")}`}
+                                        className="h-6 w-6 object-contain"
+                                    />
+                                </div>
+                            )}
+                            <div className="text-white font-text text-lg">
+                                {capitalizeFirst(item.name)}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setExpandedItemIds((prev) =>
+                                        prev.includes(item.id)
+                                            ? prev.filter((id) => id !== item.id)
+                                            : [...prev, item.id]
+                                    )
+                                }}
+                                className="text-blue-400 hover:text-blue-300 transition-colors"
+                                title="Descrição do item"
+                                aria-label="Descrição do item"
+                            >
+                                {isExpanded
+                                    ? <EyeOff size={16} />
+                                    : <Eye size={16} />
+                                }
+                            </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!canManage) return
+                                    openItemEdit(editPayload)
+                                }}
+                                disabled={!canManage}
+                                className="text-yellow-400 hover:text-yellow-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Editar item"
+                                aria-label="Editar item"
+                            >
+                                <Pencil size={18} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!canManage) return
+                                    setItemToRemove(editPayload)
+                                    setIsItemRemoveConfirmOpen(true)
+                                }}
+                                disabled={!canManage}
+                                className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Remover item"
+                                aria-label="Remover item"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        </div>
+                    </div>
+                    {isExpanded && (
+                        <div className="text-sm text-zinc-300 font-text">
+                            {item.description?.trim()
+                                ? item.description
+                                : "Descrição não disponível."}
+                        </div>
+                    )}
+                    <div className="-mx-4 w-[calc(100%+2rem)] flex flex-col text-sm text-zinc-300 font-text divide-y divide-zinc-700 border border-zinc-700/70 border-x-0 border-b-0 rounded-none overflow-hidden">
+                        <div className="px-4 py-2 text-left">
+                            Categoria: {item.category?.trim() ? formatEnum(item.category) : "-"}
+                        </div>
+                        <div className="px-4 py-2 text-left">
+                            Espaço: {item.space}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )
+    })
+
+    const ritualCards = rituals.map(renderRitualItem)
+
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
@@ -4793,117 +5356,25 @@ export default function CharacterSheet() {
                         </div>
 
                         {/* Aba Principal */}
-                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4">
-                            <div className="flex items-center justify-between">
-                                <h1 className="text-blue-400 font-smalltitle text-2xl">Status</h1>
-                                <button
-                                    onClick={openStatusEditModal}
-                                    className="px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded flex items-center gap-2 font-text"
-                                    title="Editar status"
-                                >
-                                    <Pencil size={18} />
-                                </button>
-                            </div>
-
-                            <div className="flex justify-center">
-                                <img
-                                    src={getAvatarSrc(character)}
-                                    alt={character.name}
-                                    className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"
-                                />
-                            </div>
-
-                            <div className="flex flex-col gap-3">
-                                {statusConfigs.map((config) => (
-                                    <StatusBar
-                                        key={config.field}
-                                        label={config.label}
-                                        icon={config.icon}
-                                        current={character[config.field]}
-                                        max={character[config.maxField]}
-                                        gradient={config.gradient}
-                                        onChange={(delta) => {
-                                            handleStatusChange(config.field, config.maxField, delta)
-                                        }}
-                                    />
-                                ))}
-                            </div>
-
-                            <div className="border-t border-zinc-700 pt-4">
-                                <div className="text-blue-300 font-smalltitle text-lg text-center">
-                                    Defesas
-                                </div>
-                                <div className="mt-3 grid grid-cols-3 gap-3">
-                                    <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
-                                        <div className="text-xs text-zinc-400 font-text">Passiva</div>
-                                        <div className="text-white text-lg font-text">
-                                            {character.defense_passive + defenseBonus}
-                                        </div>
-                                    </div>
-                                    <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
-                                        <div className="text-xs text-zinc-400 font-text">Esquiva</div>
-                                        <div className="text-white text-lg font-text">
-                                            {character.defense_dodging + defenseBonus}
-                                        </div>
-                                    </div>
-                                    <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
-                                        <div className="text-xs text-zinc-400 font-text">Bloqueio</div>
-                                        <div className="text-white text-lg font-text">
-                                            {character.defense_blocking + defenseBonus}
-                                        </div>
-                                    </div>
-                                </div>
-                                {resistanceBonus > 0 && (
-                                    <div className="mt-3 text-center text-sm text-zinc-300 font-text">
-                                        Testes de Resistência +{resistanceBonus}
-                                    </div>
-                                )}
-                                {elementSpecialistChoice && (
-                                    <div className="mt-2 text-center text-sm text-zinc-300 font-text">
-                                        Resistir rituais ({formatEnum(elementSpecialistChoice)}) DT +2
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                        <StatusSection
+                            character={character}
+                            defenseBonus={defenseBonus}
+                            resistanceBonus={resistanceBonus}
+                            elementSpecialistChoice={elementSpecialistChoice}
+                            onOpenStatusEdit={openStatusEditModal}
+                            onStatusChange={handleStatusChange}
+                        />
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {/* Card Atributos */}
-                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4 min-h-110">
-                            <div className="flex items-center justify-between">
-                                <h1 className="text-blue-400 font-smalltitle text-2xl">Atributos</h1>
-                                <button
-                                    onClick={openAttributesEditModal}
-                                    className="px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded flex items-center gap-2 font-text"
-                                    title="Editar atributos"
-                                >
-                                    <Pencil size={18} />
-                                </button>
-                            </div>
-                            <div className="w-full flex justify-center">
-                                <AttributesCard
-                                    mode="view"
-                                    values={{
-                                        agility: character.atrib_agility,
-                                        intellect: character.atrib_intellect,
-                                        vitallity: character.atrib_vitallity,
-                                        presence: character.atrib_presence,
-                                        strength: character.atrib_strength
-                                    }}
-                                    avatarMarkSrc={`/avatars/${character.avatar}/mark.png`}
-                                    onRollAttribute={handleRollAttribute}
-                                />
-                            </div>
-
-                            <div className="flex justify-center mt-4">
-                                <button
-                                    onClick={handleOpenLevelUp}
-                                    className="px-6 py-3 bg-green-500 hover:bg-green-600 text-black rounded-lg font-text text-lg shadow-md mt-4"
-                                >
-                                    Transcender
-                                </button>
-                            </div>
-                        </div>
+                        <AttributesSection
+                            character={character}
+                            avatarMarkSrc={avatarMarkSrc}
+                            onOpenAttributesEdit={openAttributesEditModal}
+                            onOpenLevelUp={handleOpenLevelUp}
+                            onRollAttribute={handleRollAttribute}
+                        />
 
                         {/* Card Habilidades */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
@@ -4975,485 +5446,44 @@ export default function CharacterSheet() {
                         </div>
 
                         {/* Card Perícias */}
-                        <div className="md:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
-                            <div className="relative bg-black/60 rounded-md py-2 px-4 text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                    <h1 className="text-blue-400 font-smalltitle text-3xl">Perícias</h1>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsExpertiseInfoOpen(true)}
-                                        className="text-blue-400 hover:text-blue-300 transition-colors"
-                                        title="Informações das perícias"
-                                        aria-label="Informações das perícias"
-                                    >
-                                        <Info size={18} />
-                                    </button>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={openExpertiseEditModal}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded flex items-center gap-2 font-text"
-                                    title="Editar perícias"
-                                >
-                                    <Pencil size={18} />
-                                </button>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-5 gap-0">
-                                {expertiseAttributeOrder.map((attr, index) => {
-                                    const items = Object.keys(expertiseAttributeMap)
-                                        .filter((name) => expertiseAttributeMap[name] === attr)
-                                        .sort((a, b) => {
-                                            const aStats = getEffectiveExpertiseStats(a, expertise?.[a])
-                                            const bStats = getEffectiveExpertiseStats(b, expertise?.[b])
-                                            const treinoDiff = (bStats?.treino ?? 0) - (aStats?.treino ?? 0)
-                                            if (treinoDiff !== 0) return treinoDiff
-                                            const extraDiff = (bStats?.extra ?? 0) - (aStats?.extra ?? 0)
-                                            if (extraDiff !== 0) return extraDiff
-                                            const aLabel = expertiseLabelMap[a] ?? formatEnum(a)
-                                            const bLabel = expertiseLabelMap[b] ?? formatEnum(b)
-                                            return aLabel.localeCompare(bLabel, "pt-BR")
-                                        })
-                                    return (
-                                        <div
-                                            key={attr}
-                                            className={`flex flex-col gap-2 px-3 ${index === 0 ? "" : "border-l-2 border-zinc-500"}`}
-                                        >
-                                            <div className="text-lg text-blue-300 font-smalltitle text-center">
-                                                {attributeLabelMap[attr] ?? formatEnum(attr.replace("atrib_", ""))}
-                                            </div>
-                                            <div className="flex flex-col gap-2">
-                                                {items.map((name) => {
-                                                    const stats = getEffectiveExpertiseStats(name, expertise?.[name])
-                                                    return (
-                                                        <div
-                                                            key={name}
-                                                            className="flex items-center gap-2"
-                                                        >
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const isResistance = resistanceExpertiseSet.has(name)
-                                                                    const bonusValue =
-                                                                        sentidoTaticoActive && isResistance
-                                                                            ? Number(character.atrib_intellect) || 0
-                                                                            : 0
-                                                                    requestRollExpertise(
-                                                                        name,
-                                                                        bonusValue > 0
-                                                                            ? {
-                                                                                value: bonusValue,
-                                                                                label: "Sentido Tático (Intelecto)"
-                                                                            }
-                                                                            : undefined
-                                                                    )
-                                                                }}
-                                                                className="flex-1 bg-zinc-900/70 border border-zinc-700 rounded p-2 text-left hover:border-blue-500 transition-colors"
-                                                                title="Rolar perícia"
-                                                            >
-                                                                <div className="flex items-start justify-between gap-2 font-text">
-                                                                    <div className="flex flex-col gap-1">
-                                                                    <div className={`text-base font-sans ${treinoColorClass(stats?.treino, stats?.extra)}`}>
-                                                                        {expertiseLabelMap[name] ?? formatEnum(name)}
-                                                                    </div>
-                                                                        <div className="text-sm text-zinc-400 flex flex-col">
-                                                                            <span>Treino: {stats ? stats.treino : "-"}</span>
-                                                                            <span>Extra: {stats ? stats.extra : "-"}</span>
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="text-base text-zinc-300 whitespace-nowrap">
-                                                                        Total: +{stats ? stats.total : "-"}
-                                                                    </div>
-                                                                </div>
-                                                            </button>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                            <div className="mt-2 border-t border-zinc-700 pt-2 text-sm text-zinc-300 font-text flex flex-wrap gap-4 justify-center">
-                                <div className="text-zinc-500">
-                                    Destreinado: 0
-                                </div>
-                                <div className="text-green-400">
-                                    Treinado: 5
-                                </div>
-                                <div className="text-blue-700">
-                                    Veterano: 10
-                                </div>
-                                <div className="text-orange-400">
-                                    Expert: 15
-                                </div>
-                                <div className="text-sky-300">
-                                    Apenas Bônus
-                                </div>
-                            </div>
-                        </div>
+                        <ExpertiseSection
+                            columns={expertiseColumns}
+                            onOpenInfo={() => setIsExpertiseInfoOpen(true)}
+                            onOpenEdit={openExpertiseEditModal}
+                        />
 
                         {/* Card Inventário */}
-                        <div className="md:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
-                            <div className="flex items-center justify-between gap-3 flex-wrap">
-                                <h1 className="text-blue-400 font-smalltitle text-2xl">
-                                    Inventário ({inventorySpaceUsed}/{inventorySpaceLabel})
-                                </h1>
-                            </div>
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="text-zinc-300 font-text text-sm uppercase tracking-wide">
-                                    Arsenal
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setWeaponPickerMode("list")
-                                        setWeaponToEdit(null)
-                                        setIsWeaponPickerOpen(true)
-                                    }}
-                                    className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-black rounded flex items-center gap-2 font-text"
-                                >
-                                    <Plus size={16} />
-                                    Adicionar arma
-                                </button>
-                            </div>
-                            {weapons.length === 0 && (
-                                <div className="text-zinc-300 font-text">
-                                    Nenhuma arma registrada.
-                                </div>
-                            )}
-                            {weapons.length > 0 && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {weapons.map((weapon) => {
-                                        const isUnarmedWeapon = weapon.id === UNARMED_WEAPON_ID
-                                        const effectiveDamageFormula =
-                                            weapon.id === UNARMED_WEAPON_ID
-                                                ? getUnarmedDamageFormula(character.nex_total, hasArtistaMarcial)
-                                                : weapon.damage_formula
-                                        const specialAttackAttackBonus =
-                                            pendingSpecialAttack?.target === "attack"
-                                                ? pendingSpecialAttack.bonus
-                                                : 0
-                                        const specialAttackDamageBonus =
-                                            pendingSpecialAttack?.target === "damage"
-                                                ? pendingSpecialAttack.bonus
-                                                : 0
-                                        const damageFormulaParsed = parseDamageFormula(
-                                            effectiveDamageFormula
-                                        )
-                                        const demolishingStrikeLabel =
-                                            pendingDemolishingStrike && damageFormulaParsed
-                                                ? `+2d${damageFormulaParsed.diceSides}`
-                                                : ""
-                                        const golpePesadoLabel =
-                                            hasGolpePesado
-                                            && weapon.weapon_range === "corpo_a_corpo"
-                                            && damageFormulaParsed
-                                                ? `+1d${damageFormulaParsed.diceSides}`
-                                                : ""
-                                        const firearmDamageBonus =
-                                            hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo"
-                                                ? Number(character.atrib_agility) || 0
-                                                : 0
-                                        const ninjaUrbanoDamageBonus =
-                                            hasNinjaUrbano && isTacticalWeapon(weapon) && !isFirearmWeapon(weapon)
-                                                ? 2
-                                                : 0
-                                        const tacticalDamageBonus =
-                                            hasBalisticaAvancada && isTacticalWeapon(weapon) ? 2 : 0
-                                        const damageBonusLabel = formatSignedBonus(
-                                            firearmDamageBonus
-                                            + specialAttackDamageBonus
-                                            + tacticalDamageBonus
-                                            + ninjaUrbanoDamageBonus
-                                        )
-                                        const extraDiceLabel = [demolishingStrikeLabel, golpePesadoLabel]
-                                            .filter(Boolean)
-                                            .join("")
-                                        const damageExtraLabel = `${extraDiceLabel}${damageBonusLabel}`
-                                        return (
-                                            <div
-                                                key={weapon.id}
-                                                className="w-full border border-red-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
-                                            >
-                                            <div className="flex flex-col gap-3 px-4 pt-3 pb-0 border-b border-zinc-700/70">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="text-white font-text text-lg">
-                                                            {capitalizeFirst(weapon.name)}
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setExpandedWeaponIds((prev) =>
-                                                                    prev.includes(weapon.id)
-                                                                        ? prev.filter((id) => id !== weapon.id)
-                                                                        : [...prev, weapon.id]
-                                                                )
-                                                            }}
-                                                            className="text-blue-400 hover:text-blue-300 transition-colors"
-                                                            title="Descrição da arma"
-                                                            aria-label="Descrição da arma"
-                                                        >
-                                                            {expandedWeaponIds.includes(weapon.id)
-                                                                ? <EyeOff size={16} />
-                                                                : <Eye size={16} />
-                                                            }
-                                                        </button>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => openWeaponEdit(weapon)}
-                                                            disabled={isUnarmedWeapon}
-                                                            className="text-yellow-400 hover:text-yellow-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                            title={isUnarmedWeapon ? "Arma desarmada não pode ser editada" : "Editar arma"}
-                                                            aria-label="Editar arma"
-                                                        >
-                                                            <Pencil size={18} />
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                if (isUnarmedWeapon) return
-                                                                setWeaponToRemove(weapon)
-                                                                setIsWeaponRemoveConfirmOpen(true)
-                                                            }}
-                                                            disabled={isUnarmedWeapon}
-                                                            className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                            title={isUnarmedWeapon ? "Arma desarmada não pode ser removida" : "Remover arma"}
-                                                            aria-label="Remover arma"
-                                                        >
-                                                            <Trash2 size={18} />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                                {expandedWeaponIds.includes(weapon.id) && (
-                                                    <div className="text-sm text-zinc-300 font-text">
-                                                        {weapon.description?.trim()
-                                                            ? weapon.description
-                                                            : "Descrição não disponível."}
-                                                    </div>
-                                                )}
-                                                <div className="-mx-4 w-[calc(100%+2rem)] flex flex-col text-sm text-zinc-300 font-text divide-y divide-zinc-700 border border-zinc-700/70 border-x-0 border-b-0 rounded-none overflow-hidden">
-                                                    <div className="px-4 py-2 text-left">
-                                                        Categoria: {formatEnum(weapon.category)}
-                                                    </div>
-                                                    <div className="px-4 py-2 text-left">
-                                                        Alcance: {formatEnum(weapon.weapon_range)}
-                                                    </div>
-                                                    <div className="px-4 py-2 text-left">
-                                                        Margem: {weapon.threat_margin}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="grid grid-cols-3 text-sm text-zinc-200">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleWeaponTestRoll(weapon)}
-                                                    className="py-2 border-r border-zinc-700 hover:bg-zinc-800 transition-colors font-text flex flex-col items-center leading-tight text-blue-300"
-                                                >
-                                                    <span>Teste</span>
-                                                    <span className="text-xs text-blue-200">
-                                                        {getWeaponTestFormula(weapon, specialAttackAttackBonus)}
-                                                    </span>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleWeaponDamageRoll(weapon, false)}
-                                                    className="py-2 border-r border-zinc-700 hover:bg-zinc-800 transition-colors font-text text-red-300 flex flex-col items-center leading-tight"
-                                                >
-                                                    <span>Normal</span>
-                                                    <span className="text-xs text-red-200">
-                                                        {effectiveDamageFormula}
-                                                        {damageExtraLabel}
-                                                    </span>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleWeaponDamageRoll(weapon, true)}
-                                                    className="py-2 hover:bg-zinc-800 transition-colors font-text text-red-400 flex flex-col items-center leading-tight"
-                                                >
-                                                    <span>Crítico</span>
-                                                    <span className="text-xs text-red-300">
-                                                        {getCriticalDamageLabel(weapon, effectiveDamageFormula)}
-                                                        {damageExtraLabel}
-                                                    </span>
-                                                </button>
-                                            </div>
-                                        </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
-                            <div className="flex items-center justify-between gap-3 mt-4">
-                                <div className="text-zinc-300 font-text text-sm uppercase tracking-wide">
-                                    Equipamentos
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setItemPickerMode("list")
-                                        setItemForm({ ...itemFormDefaults })
-                                        setItemSearch("")
-                                        setItemToEdit(null)
-                                        setIsItemPickerOpen(true)
-                                    }}
-                                    className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-black rounded flex items-center gap-2 font-text"
-                                >
-                                    <Plus size={16} />
-                                    Adicionar item
-                                </button>
-                            </div>
-                            {equipmentEntries.length === 0 ? (
-                                <div className="text-zinc-300 font-text">
-                                    Nenhum equipamento registrado.
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {equipmentEntries.map((item) => {
-                                        const isExpanded = expandedItemIds.includes(item.id)
-                                        const canManage = typeof item.id === "number"
-                                        const itemElement = getRitualItemElement(item.name, item.category)
-                                        const elementStyles = itemElement
-                                            ? ritualElementStyleMap[itemElement] ?? ritualElementStyleMap.default
-                                            : null
-                                        const elementIcon = itemElement ? ritualElementIconMap[itemElement] : null
-                                        const editPayload: ItemSummary = {
-                                            id: typeof item.id === "number" ? item.id : 0,
-                                            name: item.name,
-                                            description: item.description ?? "",
-                                            category: item.category ?? "",
-                                            space: item.space
-                                        }
-
-                                        return (
-                                            <div
-                                                key={item.id}
-                                                className={
-                                                    elementStyles
-                                                        ? `w-full border rounded-lg overflow-hidden ${elementStyles.card}`
-                                                        : "w-full border border-blue-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
-                                                }
-                                            >
-                                                <div className="flex flex-col gap-2 px-4 pt-3 pb-0 border-b border-zinc-700/70">
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            {elementIcon && (
-                                                                <div className="h-10 w-10 rounded-full bg-black/40 border border-zinc-700/60 flex items-center justify-center">
-                                                                    <img
-                                                                        src={elementIcon}
-                                                                        alt={`Símbolo de ${formatEnum(itemElement ?? "")}`}
-                                                                        className="h-6 w-6 object-contain"
-                                                                    />
-                                                                </div>
-                                                            )}
-                                                            <div className="text-white font-text text-lg">
-                                                                {capitalizeFirst(item.name)}
-                                                            </div>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setExpandedItemIds((prev) =>
-                                                                        prev.includes(item.id)
-                                                                            ? prev.filter((id) => id !== item.id)
-                                                                            : [...prev, item.id]
-                                                                    )
-                                                                }}
-                                                                className="text-blue-400 hover:text-blue-300 transition-colors"
-                                                                title="Descrição do item"
-                                                                aria-label="Descrição do item"
-                                                            >
-                                                                {isExpanded
-                                                                    ? <EyeOff size={16} />
-                                                                    : <Eye size={16} />
-                                                                }
-                                                            </button>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    if (!canManage) return
-                                                                    openItemEdit(editPayload)
-                                                                }}
-                                                                disabled={!canManage}
-                                                                className="text-yellow-400 hover:text-yellow-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                title="Editar item"
-                                                                aria-label="Editar item"
-                                                            >
-                                                                <Pencil size={18} />
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    if (!canManage) return
-                                                                    setItemToRemove(editPayload)
-                                                                    setIsItemRemoveConfirmOpen(true)
-                                                                }}
-                                                                disabled={!canManage}
-                                                                className="text-red-400 hover:text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                                title="Remover item"
-                                                                aria-label="Remover item"
-                                                            >
-                                                                <Trash2 size={18} />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                    {isExpanded && (
-                                                        <div className="text-sm text-zinc-300 font-text">
-                                                            {item.description?.trim()
-                                                                ? item.description
-                                                                : "Descrição não disponível."}
-                                                        </div>
-                                                    )}
-                                                    <div className="-mx-4 w-[calc(100%+2rem)] flex flex-col text-sm text-zinc-300 font-text divide-y divide-zinc-700 border border-zinc-700/70 border-x-0 border-b-0 rounded-none overflow-hidden">
-                                                        <div className="px-4 py-2 text-left">
-                                                            Categoria: {item.category?.trim() ? formatEnum(item.category) : "-"}
-                                                        </div>
-                                                        <div className="px-4 py-2 text-left">
-                                                            Espaço: {item.space}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
-                        </div>
+                        <InventorySection
+                            inventorySpaceUsed={inventorySpaceUsed}
+                            inventorySpaceLabel={inventorySpaceLabel}
+                            weaponCards={weaponCards}
+                            weaponCount={weapons.length}
+                            itemCards={itemCards}
+                            itemCount={equipmentEntries.length}
+                            onOpenWeaponPicker={() => {
+                                setWeaponPickerMode("list")
+                                setWeaponToEdit(null)
+                                setIsWeaponPickerOpen(true)
+                            }}
+                            onOpenItemPicker={() => {
+                                setItemPickerMode("list")
+                                setItemForm({ ...itemFormDefaults })
+                                setItemSearch("")
+                                setItemToEdit(null)
+                                setIsItemPickerOpen(true)
+                            }}
+                        />
 
                         {/* Card Rituais */}
-                        <div className="md:col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <h1 className="text-blue-400 font-smalltitle text-2xl">Rituais</h1>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        openRitualPicker("manual")
-                                    }}
-                                    className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-black rounded flex items-center gap-2 font-text"
-                                >
-                                    <Plus size={16} />
-                                    Adicionar ritual
-                                </button>
-                            </div>
-                            {hasRitualCaster && (
-                                <div className="text-xs text-zinc-400 font-text">
-                                    Escolhido Pelo Outro Lado: círculo máximo {ritualCasterMaxCircle} (NEX {character.nex_total}%)
-                                    {ritualCasterExtraCount > 0 ? ` | Rituais bônus: ${ritualCasterExtraCount}` : ""}
-                                </div>
-                            )}
-                            {rituals.length === 0 && (
-                                <div className="text-zinc-300 font-text">
-                                    Nenhum ritual registrado.
-                                </div>
-                            )}
-                            {rituals.length > 0 && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {rituals.map(renderRitualItem)}
-                                </div>
-                            )}
-                        </div>
+                        <RitualsSection
+                            ritualCards={ritualCards}
+                            ritualCount={rituals.length}
+                            hasRitualCaster={hasRitualCaster}
+                            ritualCasterMaxCircle={ritualCasterMaxCircle}
+                            ritualCasterExtraCount={ritualCasterExtraCount}
+                            nexTotal={character.nex_total}
+                            onOpenRitualPicker={() => openRitualPicker("manual")}
+                        />
                     </div>
                 </div>
             </div>
@@ -5548,17 +5578,33 @@ export default function CharacterSheet() {
                         </span>
                         {trailAbilityDetails.length > 0 ? (
                             <div className="flex flex-col gap-3">
-                                {trailAbilityDetails.map((ability) => (
+                                {trailAbilityDetails.map((detail) => (
                                     <div
-                                        key={ability.id}
+                                        key={detail.ability.id}
                                         className="rounded border border-zinc-700/70 bg-zinc-900/70 px-3 py-2"
                                     >
-                                        <div className="text-zinc-100 font-text">
-                                            {ability.name}
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="text-zinc-100 font-text">
+                                                {detail.ability.name}
+                                            </div>
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <span className="text-zinc-400">
+                                                    {detail.nexLabel}
+                                                </span>
+                                                <span
+                                                    className={`px-2 py-0.5 rounded-full border ${
+                                                        detail.isUnlocked
+                                                            ? "border-emerald-400/60 text-emerald-200 bg-emerald-900/30"
+                                                            : "border-red-400/60 text-red-200 bg-red-900/30"
+                                                    }`}
+                                                >
+                                                    {detail.isUnlocked ? "Desbloqueada" : "Bloqueada"}
+                                                </span>
+                                            </div>
                                         </div>
                                         <div className="text-zinc-300 text-sm whitespace-pre-wrap">
-                                            {ability.description?.trim()
-                                                ? ability.description.trim()
+                                            {detail.ability.description?.trim()
+                                                ? detail.ability.description.trim()
                                                 : "Descrição da habilidade não disponível."}
                                         </div>
                                     </div>
@@ -7398,6 +7444,45 @@ export default function CharacterSheet() {
                 </div>
             </Modal>
             <Modal
+                isOpen={isSaberPoderPromptOpen}
+                onClose={() => handleConfirmSaberPoder(false)}
+                className="w-[min(100%-1.5rem,24rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Saber é Poder</div>
+                    <button
+                        type="button"
+                        onClick={() => handleConfirmSaberPoder(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Usar Saber é Poder? (+5, custo 2 PE)
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmSaberPoder(false)}
+                            className="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-white"
+                        >
+                            Agora não
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleConfirmSaberPoder(true)}
+                            disabled={currentEffort < saberPoderCost}
+                            className="px-4 py-2 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed text-black"
+                        >
+                            Usar (2 PE)
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
                 isOpen={isEnvoltoMisterioPromptOpen}
                 onClose={() => handleConfirmEnvoltoMisterio(false)}
                 className="w-[min(100%-1.5rem,24rem)] max-h-[90vh] overflow-hidden font-sans"
@@ -7642,7 +7727,7 @@ export default function CharacterSheet() {
                     }
                 }}
             />
-            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || ritualOutcomeToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive || conhecimentoAplicadoActive || ecleticoActive || isTrilhaCertaPromptOpen) && (
+            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || ritualOutcomeToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive || conhecimentoAplicadoActive || ecleticoActive || saberPoderActive || isTrilhaCertaPromptOpen) && (
                 <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
                     {pendingSpecialAttack && (
                         <div className="min-w-[16rem] max-w-88 rounded-lg border border-red-500/40 bg-red-900/30 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
@@ -7724,6 +7809,23 @@ export default function CharacterSheet() {
                                 <button
                                     type="button"
                                     onClick={handleCancelConhecimentoAplicado}
+                                    className="text-xs text-emerald-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {saberPoderActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-emerald-500/40 bg-emerald-900/30 px-4 py-3 text-emerald-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Saber é Poder ativo</div>
+                            <div className="text-xs text-emerald-200">
+                                Próximo teste de Intelecto recebe +5
+                            </div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelSaberPoder}
                                     className="text-xs text-emerald-100 hover:text-white underline underline-offset-2"
                                 >
                                     Cancelar

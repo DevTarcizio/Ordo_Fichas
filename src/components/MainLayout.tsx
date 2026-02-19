@@ -7,17 +7,17 @@ interface MainLayoutProps {
 
 export default function MainLayout({children}: MainLayoutProps) {
     return (
-        <div className="relative min-h-screen w-full overflow-hidden text-white">
+        <div className="relative min-h-screen w-full overflow-x-hidden text-white">
 
             {/* Background */}
             <img 
                 src={background_image} 
                 alt="Background"
-                className="absolute inset-0 w-full h-full object-cover" 
+                className="fixed inset-0 w-screen h-screen object-cover object-center" 
             />
 
             {/* Overlay */}
-            <div className="absolute inset-0 bg-black/50"/>
+            <div className="fixed inset-0 bg-black/50"/>
 
             {/* Conteudo Principal */}
             <div className="relative z-10 w-full">

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react"
+﻿import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
@@ -29,6 +29,8 @@ const trainingOptions = [
     { value: 15, label: "Expert (15)" }
 ]
 
+const expertiseNames = Object.keys(expertiseAttributeMap)
+
 type OriginOption = {
     id?: number
     name?: string
@@ -37,10 +39,22 @@ type OriginOption = {
     expertises?: unknown
 }
 
+type TrailOption = {
+    id?: number
+    name?: string
+}
+
 const normalizeOriginName = (origin: OriginOption) => {
     if (typeof origin.name === "string") return origin.name
     return ""
 }
+
+const normalizeTrailName = (trail: TrailOption) => {
+    if (typeof trail.name === "string") return trail.name
+    return ""
+}
+
+const normalizeKey = (value: string) => value.trim().toLowerCase()
 
 const extractOriginExpertise = (origin: OriginOption): string[] => {
     const raw = origin.trained_expertise ?? origin.expertise ?? origin.expertises
@@ -72,10 +86,10 @@ export default function CreateCharacter() {
     const [formErrors, setFormErrors] = useState<string[]>([])
     const [step, setStep] = useState<"details" | "attributes" | "expertise">("details")
     const [originOptions, setOriginOptions] = useState<OriginOption[]>([])
+    const [trailOptions, setTrailOptions] = useState<TrailOption[]>([])
     const [originExpertiseNames, setOriginExpertiseNames] = useState<string[]>([])
     const [manualTraining, setManualTraining] = useState<Record<string, boolean>>({})
 
-    const expertiseNames = Object.keys(expertiseAttributeMap)
     const [expertiseTraining, setExpertiseTraining] = useState<Record<string, number>>(
         () =>
             expertiseNames.reduce((acc, name) => {
@@ -96,6 +110,7 @@ export default function CreateCharacter() {
 
         origin: "",
         origin_id: "",
+        trail_id: "",
         character_class: "",
         rank: "",
         trail: "",
@@ -137,10 +152,31 @@ export default function CreateCharacter() {
     }, [])
 
     useEffect(() => {
+        let isMounted = true
+        api.get("/trails/")
+            .then((res) => {
+                const list = Array.isArray(res.data?.trails)
+                    ? res.data.trails
+                    : Array.isArray(res.data)
+                        ? res.data
+                        : []
+                if (!isMounted) return
+                setTrailOptions(list)
+            })
+            .catch(() => {
+                if (isMounted) setTrailOptions([])
+            })
+
+        return () => {
+            isMounted = false
+        }
+    }, [])
+
+    useEffect(() => {
         if (!form.character_class) return
         const allowedTrails = classTrailMap[form.character_class]
         if (allowedTrails && form.trail && !allowedTrails.includes(form.trail)) {
-            setForm(prev => ({ ...prev, trail: "" }))
+            setForm(prev => ({ ...prev, trail: "", trail_id: "" }))
         }
         if (form.subclass && form.subclass === form.character_class) {
             setForm(prev => ({ ...prev, subclass: "" }))
@@ -176,6 +212,21 @@ export default function CreateCharacter() {
         form.nex_class,
         form.nex_subclass
     ])
+
+    useEffect(() => {
+        if (!form.trail) {
+            setForm(prev => ({ ...prev, trail_id: "" }))
+            return
+        }
+        const match = trailOptions.find(
+            (trail) => normalizeKey(normalizeTrailName(trail)) === normalizeKey(form.trail)
+        )
+        if (match?.id != null) {
+            setForm(prev => ({ ...prev, trail_id: String(match.id) }))
+        } else {
+            setForm(prev => ({ ...prev, trail_id: "" }))
+        }
+    }, [form.trail, trailOptions])
 
     useEffect(() => {
         if (!form.origin) {
@@ -238,33 +289,50 @@ export default function CreateCharacter() {
         })
     }, [originExpertiseNames, manualTraining])
 
-    const availableTrails = form.character_class
-        ? classTrailMap[form.character_class] ?? []
-        : trails
+    const availableTrails = useMemo(
+        () =>
+            form.character_class
+                ? classTrailMap[form.character_class] ?? []
+                : trails,
+        [form.character_class]
+    )
 
-    const availableSubclasses = form.character_class
-        ? subclasses.filter((subclass) => subclass !== form.character_class)
-        : subclasses
+    const availableSubclasses = useMemo(
+        () =>
+            form.character_class
+                ? subclasses.filter((subclass) => subclass !== form.character_class)
+                : subclasses,
+        [form.character_class]
+    )
 
     const canTrainExpertise = ["mundano", "combatente", "especialista", "ocultista"].includes(form.character_class)
     const intellectValue = Math.max(0, Number(form.atrib_intellect) || 0)
     const nexTotalValue = Math.max(0, Number(form.nex_total) || 0)
-    const attributePoints = (() => {
+    const attributePoints = useMemo(() => {
         if (nexTotalValue >= 95) return 8
         if (nexTotalValue >= 80) return 7
         if (nexTotalValue >= 50) return 6
         if (nexTotalValue >= 20) return 5
         return 4
-    })()
-    const normalizedOriginExpertise = originExpertiseNames
-        .map((name) => name.toLowerCase())
-        .filter((name) => expertiseAttributeMap[name])
-    const uniqueOriginExpertise = Array.from(new Set(normalizedOriginExpertise))
-    const originExpertiseLabels = uniqueOriginExpertise
-        .map((name) => expertiseLabelMap[name] ?? formatEnum(name))
+    }, [nexTotalValue])
+    const normalizedOriginExpertise = useMemo(
+        () =>
+            originExpertiseNames
+                .map((name) => name.toLowerCase())
+                .filter((name) => expertiseAttributeMap[name]),
+        [originExpertiseNames]
+    )
+    const uniqueOriginExpertise = useMemo(
+        () => Array.from(new Set(normalizedOriginExpertise)),
+        [normalizedOriginExpertise]
+    )
+    const originExpertiseLabels = useMemo(
+        () => uniqueOriginExpertise.map((name) => expertiseLabelMap[name] ?? formatEnum(name)),
+        [uniqueOriginExpertise]
+    )
     const originTrainingCount = uniqueOriginExpertise.length
 
-    const classTrainingCount = (() => {
+    const classTrainingCount = useMemo(() => {
         switch (form.character_class) {
             case "mundano":
                 return 1 + intellectValue
@@ -277,13 +345,20 @@ export default function CreateCharacter() {
             default:
                 return 0
         }
-    })()
+    }, [form.character_class, intellectValue])
 
-    const requiredTrainingCount = canTrainExpertise
-        ? classTrainingCount + originTrainingCount + (form.character_class === "combatente" ? 2 : 0)
-        : 0
+    const requiredTrainingCount = useMemo(
+        () =>
+            canTrainExpertise
+                ? classTrainingCount + originTrainingCount + (form.character_class === "combatente" ? 2 : 0)
+                : 0,
+        [canTrainExpertise, classTrainingCount, originTrainingCount, form.character_class]
+    )
 
-    const selectedTrainingCount = Object.values(expertiseTraining).filter((value) => value > 0).length
+    const selectedTrainingCount = useMemo(
+        () => Object.values(expertiseTraining).filter((value) => value > 0).length,
+        [expertiseTraining]
+    )
 
     function handleChange(
         e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -379,6 +454,10 @@ export default function CreateCharacter() {
             setFormErrors(["Selecione uma origem válida."])
             return
         }
+        if (!form.trail_id) {
+            setFormErrors(["Selecione uma trilha válida."])
+            return
+        }
 
         const expertise_training = Object.fromEntries(
             Object.entries(expertiseTraining).filter(([, value]) => value > 0)
@@ -393,6 +472,7 @@ export default function CreateCharacter() {
                 origin_id: Number(form.origin_id),
                 character_class: form.character_class,
                 rank: form.rank,
+                trail_id: Number(form.trail_id),
                 trail: form.trail,
                 subclass: form.subclass,
                 nex_total: Number(form.nex_total),
@@ -832,3 +912,6 @@ export default function CreateCharacter() {
         
     )
 }
+
+
+

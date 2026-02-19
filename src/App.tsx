@@ -1,13 +1,22 @@
+import { lazy, Suspense } from "react"
 import { Routes, Route } from "react-router-dom"
-import Home from "./pages/Home"
-import Dashboard from "./pages/Dashboard"
 import PrivateRoute from "./routes/PrivateRoute"
-import CreateCharacter from "./pages/CreateCharacter"
-import CharacterSheet from "./pages/CharacterSheet"
+
+const Home = lazy(() => import("./pages/Home"))
+const Dashboard = lazy(() => import("./pages/Dashboard"))
+const CreateCharacter = lazy(() => import("./pages/CreateCharacter"))
+const CharacterSheet = lazy(() => import("./pages/CharacterSheet"))
 
 function App() {
   return (
-    <Routes>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-white">
+          Carregando...
+        </div>
+      }
+    >
+      <Routes>
      
       <Route 
         path="/" 
@@ -42,7 +51,8 @@ function App() {
       />
 
 
-    </Routes>
+      </Routes>
+    </Suspense>
   )
 }
 
