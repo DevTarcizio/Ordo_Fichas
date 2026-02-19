@@ -388,6 +388,36 @@ const normalizeText = (value: string) =>
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
 
+const getDefenseBonusFromItem = (name: string, category?: string) => {
+    const haystack = normalizeText(`${name} ${category ?? ""}`)
+    if (haystack.includes("protecao pesada") || haystack.includes("protecoes_pesadas")) {
+        return 10
+    }
+    if (haystack.includes("protecao leve") || haystack.includes("protecoes_leves")) {
+        return 5
+    }
+    if (haystack.includes("escudo")) return 2
+    return 0
+}
+
+const ritualItemElements = ["conhecimento", "energia", "morte", "sangue", "medo"]
+
+const getRitualItemElement = (name: string, category?: string) => {
+    const normalized = normalizeText(`${name} ${category ?? ""}`)
+    const compact = normalized.replace(/[()]/g, "").replace(/[_-]/g, " ")
+    for (const element of ritualItemElements) {
+        if (
+            compact.includes(`amarras de ${element}`)
+            || compact.includes(`amarras ${element}`)
+            || compact.includes(`componentes ritualisticos de ${element}`)
+            || compact.includes(`componentes ritualisticos ${element}`)
+        ) {
+            return element
+        }
+    }
+    return null
+}
+
 const getRequirementValue = (
     requirements: AbilitySummary["requirements"],
     reqType: string
@@ -3202,6 +3232,10 @@ export default function CharacterSheet() {
             category?: string
             description?: string
         } => entry !== null)
+    const defenseItemBonus = equipmentEntries.reduce(
+        (sum, item) => sum + getDefenseBonusFromItem(item.name, item.category),
+        0
+    )
     const weaponsSpaceUsed = weapons.reduce((sum, weapon) => sum + (Number(weapon.space) || 0), 0)
     const equipmentSpaceUsed = equipmentEntries.reduce((sum, item) => sum + item.space, 0)
     const inventorySpaceUsed = inventorySpace?.used ?? (weaponsSpaceUsed + equipmentSpaceUsed)
@@ -3533,7 +3567,8 @@ export default function CharacterSheet() {
     const conhecimentoAplicadoCost = 2
     const ecleticoCost = 2
     const sentidoTaticoBonus = sentidoTaticoActive ? Number(character.atrib_intellect) || 0 : 0
-    const defenseBonus = (defensiveCombatActive ? 5 : 0) + sentidoTaticoBonus
+    const defenseBonus =
+        (defensiveCombatActive ? 5 : 0) + sentidoTaticoBonus + defenseItemBonus
     const resistanceBonus = baseResistanceBonus + sentidoTaticoBonus
     const pePerRoundLimit = Number(character.PE_per_round) || 0
     const trilhaCertaNextCost = trilhaCertaBaseCost + trilhaCertaBonusDice
@@ -5278,6 +5313,11 @@ export default function CharacterSheet() {
                                     {equipmentEntries.map((item) => {
                                         const isExpanded = expandedItemIds.includes(item.id)
                                         const canManage = typeof item.id === "number"
+                                        const itemElement = getRitualItemElement(item.name, item.category)
+                                        const elementStyles = itemElement
+                                            ? ritualElementStyleMap[itemElement] ?? ritualElementStyleMap.default
+                                            : null
+                                        const elementIcon = itemElement ? ritualElementIconMap[itemElement] : null
                                         const editPayload: ItemSummary = {
                                             id: typeof item.id === "number" ? item.id : 0,
                                             name: item.name,
@@ -5289,11 +5329,24 @@ export default function CharacterSheet() {
                                         return (
                                             <div
                                                 key={item.id}
-                                                className="w-full border border-blue-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
+                                                className={
+                                                    elementStyles
+                                                        ? `w-full border rounded-lg overflow-hidden ${elementStyles.card}`
+                                                        : "w-full border border-blue-500/80 rounded-lg bg-zinc-900/70 overflow-hidden"
+                                                }
                                             >
                                                 <div className="flex flex-col gap-2 px-4 pt-3 pb-0 border-b border-zinc-700/70">
                                                     <div className="flex items-center justify-between gap-2">
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            {elementIcon && (
+                                                                <div className="h-10 w-10 rounded-full bg-black/40 border border-zinc-700/60 flex items-center justify-center">
+                                                                    <img
+                                                                        src={elementIcon}
+                                                                        alt={`Símbolo de ${formatEnum(itemElement ?? "")}`}
+                                                                        className="h-6 w-6 object-contain"
+                                                                    />
+                                                                </div>
+                                                            )}
                                                             <div className="text-white font-text text-lg">
                                                                 {capitalizeFirst(item.name)}
                                                             </div>
