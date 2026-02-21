@@ -77,15 +77,20 @@ type PendingSaberPoder =
     | {
         kind: "expertise"
         expertiseName: string
-        extraBonus?: { value: number; label?: string }
-        dicePenalty: number
-        options?: { successMin?: number; successLabel?: string }
+        options?: SkillTestOptions
     }
     | {
         kind: "attribute"
         attribute: keyof typeof attributeKeyLabelMap
         value: number
     }
+
+type SkillTestOptions = {
+    successMin?: number
+    successLabel?: string
+    useAbilities?: string[]
+    context?: Record<string, unknown>
+}
 
 type SpecialAttackEffect = {
     options: SpecialAttackOption[]
@@ -172,16 +177,23 @@ const formatSignedBonus = (value: number) => {
     return value > 0 ? `+${value}` : String(value)
 }
 
-const mergeExtraBonus = (
-    base?: { value: number; label?: string } | null,
-    extra?: { value: number; label?: string } | null
-) => {
-    if (!extra) return base ?? undefined
-    if (!base) return extra ?? undefined
-    return {
-        value: base.value + extra.value,
-        label: [base.label, extra.label].filter(Boolean).join(" + ")
+const mergeSkillTestOptions = (
+    base?: SkillTestOptions,
+    extra?: { useAbilities?: string[]; context?: Record<string, unknown> }
+): SkillTestOptions => {
+    const next: SkillTestOptions = {
+        successMin: base?.successMin,
+        successLabel: base?.successLabel
     }
+    const abilities = new Set(base?.useAbilities ?? [])
+    extra?.useAbilities?.forEach((name) => abilities.add(name))
+    if (abilities.size > 0) {
+        next.useAbilities = Array.from(abilities)
+    }
+    if (base?.context || extra?.context) {
+        next.context = { ...(base?.context ?? {}), ...(extra?.context ?? {}) }
+    }
+    return next
 }
 
 const parseRitualCasterEffect = (
@@ -960,10 +972,6 @@ const parseDamageFormula = (formula: string) => {
     return { diceCount, diceSides }
 }
 
-const rollDice = (diceCount: number, diceSides: number) => (
-    Array.from({ length: diceCount }, () => Math.floor(Math.random() * diceSides) + 1)
-)
-
 export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
@@ -1033,23 +1041,17 @@ export default function CharacterSheet() {
     const [isPrimeiraImpressaoPromptOpen, setIsPrimeiraImpressaoPromptOpen] = useState(false)
     const [pendingPrimeiraImpressao, setPendingPrimeiraImpressao] = useState<{
         expertiseName: string
-        extraBonus?: { value: number; label?: string }
-        dicePenalty: number
-        options?: { successMin?: number; successLabel?: string }
+        options?: SkillTestOptions
     } | null>(null)
     const [isEnvoltoMisterioPromptOpen, setIsEnvoltoMisterioPromptOpen] = useState(false)
     const [pendingEnvoltoMisterio, setPendingEnvoltoMisterio] = useState<{
         expertiseName: string
-        extraBonus?: { value: number; label?: string }
-        dicePenalty: number
-        options?: { successMin?: number; successLabel?: string }
+        options?: SkillTestOptions
     } | null>(null)
     const [isIdentificacaoParanormalPromptOpen, setIsIdentificacaoParanormalPromptOpen] = useState(false)
     const [pendingIdentificacaoParanormal, setPendingIdentificacaoParanormal] = useState<{
         expertiseName: string
-        extraBonus?: { value: number; label?: string }
-        dicePenalty: number
-        options?: { successMin?: number; successLabel?: string }
+        options?: SkillTestOptions
     } | null>(null)
     const [trilhaCertaBonusDice, setTrilhaCertaBonusDice] = useState(0)
     const [isTrilhaCertaPromptOpen, setIsTrilhaCertaPromptOpen] = useState(false)
@@ -1885,201 +1887,119 @@ export default function CharacterSheet() {
 
     const handleRollExpertise = async (
         expertiseName: string,
-        extraBonus?: { value: number; label?: string },
-        dicePenalty = 0,
-        options?: {
-            successMin?: number
-            successLabel?: string
-            extraDice?: number
-            extraDiceLabel?: string
-        }
+        options?: SkillTestOptions
     ) => {
         setIsRollOpen(true)
         setIsRolling(true)
         setRollResult(null)
+        const normalizedSkill = normalizeText(expertiseName)
         const shouldPromptTrilhaCerta =
-            hasNaTrilhaCerta && trilhaCertaExpertiseSet.has(normalizeText(expertiseName))
+            hasNaTrilhaCerta && trilhaCertaExpertiseSet.has(normalizedSkill)
         setIsTrilhaCertaPromptOpen(shouldPromptTrilhaCerta || trilhaCertaBonusDice > 0)
 
         try {
-            const shouldApplyConhecimento = consumeConhecimentoAplicado(expertiseName)
-            const response = await api.get(
-                `/characters/${character!.id}/expertise/${expertiseName}/roll`
-            )
-            const baseResult = response.data as ExpertiseRollResult
-            const trainedValue =
-                expertise?.[expertiseName]?.treino ?? baseResult.treino ?? 0
-            const isUntrained = trainedValue <= 0
-            const shouldApplyEcletico = ecleticoActive && isUntrained
-            const ecleticoBonus = shouldApplyEcletico ? 5 : 0
-            const hackerBonus = getHackerBonusForExpertise(expertiseName)
+            const useAbilities = new Set(options?.useAbilities ?? [])
+            const context = { ...(options?.context ?? {}) }
+            const trainedValue = expertise?.[expertiseName]?.treino ?? 0
+
+            const shouldApplyConhecimento =
+                conhecimentoAplicadoActive
+                && normalizedSkill !== "luta"
+                && normalizedSkill !== "pontaria"
+            if (shouldApplyConhecimento) {
+                useAbilities.add("Conhecimento Aplicado")
+            }
+
+            const shouldApplyEcletico = ecleticoActive && trainedValue <= 0
+            if (shouldApplyEcletico) {
+                useAbilities.add("Eclético")
+            }
+
             const peritoEligible =
                 pendingPerito
                 && hasPerito
                 && trainedValue > 0
                 && peritoSelectedSet.has(normalizeText(expertiseName))
-            const peritoBonusValue = peritoEligible
-                ? Math.floor(Math.random() * pendingPerito!.diceSides) + 1
-                : 0
-            const peritoBonusDice = peritoEligible
-                ? `1d${pendingPerito!.diceSides}`
-                : undefined
+
+            if (peritoEligible) {
+                useAbilities.add("Perito")
+            }
+
+            if (hasHacker && normalizedSkill === "tecnologia") {
+                context.is_hacking = true
+            }
+
+            if (sentidoTaticoActive && resistanceExpertiseSet.has(normalizedSkill)) {
+                context.sentido_tatico_active = true
+            }
+
+            if (hasMaosRapidas && normalizedSkill === "crime") {
+                setIsQuickHandsPromptOpen(true)
+            }
+
+            const response = await api.post("/actions/skill-test", {
+                character_id: character!.id,
+                skill: normalizedSkill,
+                use_abilities: Array.from(useAbilities),
+                context,
+                dc: options?.successMin,
+                perito_skill: peritoEligible ? normalizedSkill : undefined,
+                perito_choice: peritoEligible && pendingPerito
+                    ? {
+                        pe_cost: pendingPerito.peCost,
+                        bonus_dice: `1d${pendingPerito.diceSides}`,
+                        dice_sides: pendingPerito.diceSides
+                    }
+                    : undefined
+            })
+
+            const data = response.data ?? {}
+            if (typeof data.effort_points === "number") {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    return { ...prev, effort_points: data.effort_points }
+                })
+            }
+
+            const dice = Array.isArray(data.dice)
+                ? data.dice.filter((value: unknown): value is number => typeof value === "number")
+                : []
+            const rollResult: ExpertiseRollResult = {
+                expertise: expertiseLabelMap[normalizedSkill] ?? formatEnum(normalizedSkill),
+                attribute: attributeKeyLabelMap[data.attribute as keyof typeof attributeKeyLabelMap]
+                    ?? formatEnum(data.attribute ?? ""),
+                attribute_value: Number(data.attribute_value ?? 0),
+                dice_count: Number(data.dice_count ?? dice.length),
+                dice,
+                treino: Number(data.treino ?? 0),
+                extra: Number(data.extra ?? 0),
+                bonus: Number(data.bonus ?? 0),
+                total: Number(data.total ?? 0),
+                roll_mode: data.roll_mode,
+                success_min: options?.successMin,
+                success_label: options?.successLabel,
+                trilha_certa_bonus_dice: data.consumed_bonus_dice || undefined,
+                primeira_impressao_bonus_dice: data.first_impression_bonus_dice || undefined,
+                primeira_impressao_label: data.first_impression_bonus_dice
+                    ? "Primeira Impressão"
+                    : undefined,
+                perito_bonus_value: data.perito_bonus_value || undefined,
+                perito_bonus_dice: data.perito_bonus_dice || undefined
+            }
+
+            setRollResult(rollResult)
+
             if (shouldApplyEcletico) {
                 setEcleticoActive(false)
+            }
+            if (shouldApplyConhecimento) {
+                setConhecimentoAplicadoActive(false)
             }
             if (peritoEligible) {
                 setPendingPerito(null)
             }
-            if (hasMaosRapidas && normalizeText(expertiseName) === "crime") {
-                setIsQuickHandsPromptOpen(true)
-            }
-            let adjustedResult = baseResult
-            if (shouldApplyConhecimento) {
-                const intellectValue = Math.max(0, Number(character?.atrib_intellect ?? 0))
-                const dice = Array.from(
-                    { length: intellectValue },
-                    () => Math.floor(Math.random() * 20) + 1
-                )
-                const maxDie = dice.length ? Math.max(...dice) : 0
-                const bonus = baseResult.bonus ?? 0
-                const attributeKey =
-                    typeof baseResult.attribute === "string" && baseResult.attribute.startsWith("atrib_")
-                        ? "atrib_intellect"
-                        : attributeLabelMap.atrib_intellect ?? "Intelecto"
-                adjustedResult = {
-                    ...baseResult,
-                    attribute: attributeKey,
-                    attribute_value: intellectValue,
-                    dice_count: dice.length,
-                    dice,
-                    total: maxDie + bonus
-                }
-            }
-            if (dicePenalty > 0 && adjustedResult.dice.length > 0) {
-                const remainingDice = adjustedResult.dice.length - dicePenalty
-                if (remainingDice <= 0) {
-                    const penaltyDice = Array.from(
-                        { length: 2 },
-                        () => Math.floor(Math.random() * 20) + 1
-                    )
-                    const worstDie = Math.min(...penaltyDice)
-                    const bonus = adjustedResult.bonus ?? 0
-                    adjustedResult = {
-                        ...adjustedResult,
-                        dice: penaltyDice,
-                        dice_count: penaltyDice.length,
-                        total: worstDie + bonus,
-                        roll_mode: "worst"
-                    }
-                } else {
-                    const trimmedDice = adjustedResult.dice.slice(0, Math.max(0, remainingDice))
-                    const maxDie = trimmedDice.length ? Math.max(...trimmedDice) : 0
-                    const bonus = adjustedResult.bonus ?? 0
-                    adjustedResult = {
-                        ...adjustedResult,
-                        dice: trimmedDice,
-                        dice_count: trimmedDice.length,
-                        total: maxDie + bonus
-                    }
-                }
-            }
-            const trilhaCertaDiceToUse =
-                trilhaCertaBonusDice > 0
-                && trilhaCertaExpertiseSet.has(normalizeText(expertiseName))
-                    ? trilhaCertaBonusDice
-                    : 0
-            if (trilhaCertaDiceToUse > 0) {
-                const extraDice = Array.from(
-                    { length: trilhaCertaDiceToUse },
-                    () => Math.floor(Math.random() * 20) + 1
-                )
-                const combinedDice = [...adjustedResult.dice, ...extraDice]
-                const rollMode = adjustedResult.roll_mode ?? "best"
-                const dieValue = combinedDice.length
-                    ? rollMode === "worst"
-                        ? Math.min(...combinedDice)
-                        : Math.max(...combinedDice)
-                    : 0
-                const bonus = adjustedResult.bonus ?? 0
-                adjustedResult = {
-                    ...adjustedResult,
-                    dice: combinedDice,
-                    dice_count: combinedDice.length,
-                    total: dieValue + bonus,
-                    trilha_certa_bonus_dice: trilhaCertaDiceToUse
-                }
-            }
-            const extraDiceCount = Math.max(0, options?.extraDice ?? 0)
-            if (extraDiceCount > 0) {
-                const extraDice = Array.from(
-                    { length: extraDiceCount },
-                    () => Math.floor(Math.random() * 20) + 1
-                )
-                const combinedDice = [...adjustedResult.dice, ...extraDice]
-                const rollMode = adjustedResult.roll_mode ?? "best"
-                const dieValue = combinedDice.length
-                    ? rollMode === "worst"
-                        ? Math.min(...combinedDice)
-                        : Math.max(...combinedDice)
-                    : 0
-                const bonus = adjustedResult.bonus ?? 0
-                adjustedResult = {
-                    ...adjustedResult,
-                    dice: combinedDice,
-                    dice_count: combinedDice.length,
-                    total: dieValue + bonus,
-                    primeira_impressao_bonus_dice: extraDiceCount,
-                    primeira_impressao_label: options?.extraDiceLabel
-                }
-            }
-            const combinedExtraBonus = (() => {
-                const extras: { value: number; label?: string }[] = []
-                if (extraBonus && Number.isFinite(extraBonus.value) && extraBonus.value !== 0) {
-                    extras.push(extraBonus)
-                }
-                if (hackerBonus) {
-                    extras.push({ value: hackerBonus, label: "Hacker" })
-                }
-                if (peritoBonusValue) {
-                    extras.push({
-                        value: peritoBonusValue,
-                        label: peritoBonusDice ? `Perito (${peritoBonusDice})` : "Perito"
-                    })
-                }
-                if (ecleticoBonus) {
-                    extras.push({ value: ecleticoBonus, label: "Eclético" })
-                }
-                if (extras.length === 0) return null
-                if (extras.length === 1) return extras[0]
-                return {
-                    value: extras.reduce((sum, item) => sum + item.value, 0),
-                    label: extras.map((item) => item.label ?? "Bônus").join(" + ")
-                }
-            })()
-            const successInfo = options?.successMin
-                ? { success_min: options.successMin, success_label: options.successLabel }
-                : {}
-            const peritoInfo = peritoBonusValue
-                ? { perito_bonus_value: peritoBonusValue, perito_bonus_dice: peritoBonusDice }
-                : {}
-            if (combinedExtraBonus && Number.isFinite(combinedExtraBonus.value) && combinedExtraBonus.value !== 0) {
-                const nextBonus = (adjustedResult.bonus ?? 0) + combinedExtraBonus.value
-                const nextTotal = (adjustedResult.total ?? 0) + combinedExtraBonus.value
-                setRollResult({
-                    ...adjustedResult,
-                    ...successInfo,
-                    ...peritoInfo,
-                    bonus: nextBonus,
-                    total: nextTotal,
-                    extra_bonus: combinedExtraBonus.value,
-                    extra_label: combinedExtraBonus.label
-                })
-            } else {
-                setRollResult({
-                    ...adjustedResult,
-                    ...successInfo,
-                    ...peritoInfo
-                })
+            if (trilhaCertaBonusDice > 0) {
+                setTrilhaCertaBonusDice(0)
             }
         } catch (err) {
             console.error(err)
@@ -2091,9 +2011,7 @@ export default function CharacterSheet() {
 
     const requestRollExpertise = (
         expertiseName: string,
-        extraBonus?: { value: number; label?: string },
-        dicePenalty = 0,
-        options?: { successMin?: number; successLabel?: string },
+        options?: SkillTestOptions,
         skipEnvoltoMisterio = false,
         skipIdentificacaoParanormal = false,
         skipSaberPoder = false
@@ -2104,7 +2022,9 @@ export default function CharacterSheet() {
             || (conhecimentoAplicadoActive && normalizedExpertise !== "luta" && normalizedExpertise !== "pontaria")
         if (saberPoderActive && shouldUseIntellect) {
             setSaberPoderActive(false)
-            extraBonus = mergeExtraBonus(extraBonus, { value: 5, label: "Saber é Poder" })
+            options = mergeSkillTestOptions(options, {
+                useAbilities: ["Saber é Poder"]
+            })
         } else if (
             !skipSaberPoder
             && hasSaberPoder
@@ -2114,8 +2034,6 @@ export default function CharacterSheet() {
             setPendingSaberPoder({
                 kind: "expertise",
                 expertiseName,
-                extraBonus,
-                dicePenalty,
                 options
             })
             setIsSaberPoderPromptOpen(true)
@@ -2131,8 +2049,6 @@ export default function CharacterSheet() {
         ) {
             setPendingIdentificacaoParanormal({
                 expertiseName,
-                extraBonus,
-                dicePenalty,
                 options
             })
             setIsIdentificacaoParanormalPromptOpen(true)
@@ -2145,8 +2061,6 @@ export default function CharacterSheet() {
         ) {
             setPendingEnvoltoMisterio({
                 expertiseName,
-                extraBonus,
-                dicePenalty,
                 options
             })
             setIsEnvoltoMisterioPromptOpen(true)
@@ -2158,50 +2072,89 @@ export default function CharacterSheet() {
         ) {
             setPendingPrimeiraImpressao({
                 expertiseName,
-                extraBonus,
-                dicePenalty,
                 options
             })
             setIsPrimeiraImpressaoPromptOpen(true)
             return
         }
-        handleRollExpertise(expertiseName, extraBonus, dicePenalty, options)
+        handleRollExpertise(expertiseName, options)
     }
 
-    const performAttributeRoll = (
+    const performAttributeRoll = async (
         attribute: keyof typeof attributeKeyLabelMap,
-        value: number,
-        extraBonus?: { value: number; label?: string } | null
+        options?: SkillTestOptions
     ) => {
-        const diceCount = Math.max(0, value)
-        const dice = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 20) + 1)
-        const maxDie = dice.length ? Math.max(...dice) : 0
-        const bonusValue = extraBonus?.value ?? 0
-        const total = maxDie + bonusValue
-
-        setIsTrilhaCertaPromptOpen(false)
-        setRollResult({
-            expertise: attributeKeyLabelMap[attribute] ?? formatEnum(attribute),
-            attribute: attributeKeyLabelMap[attribute] ?? formatEnum(attribute),
-            attribute_value: value,
-            dice_count: diceCount,
-            dice,
-            treino: 0,
-            extra: 0,
-            bonus: bonusValue,
-            total,
-            extra_bonus: bonusValue || undefined,
-            extra_label: extraBonus?.label
-        })
+        if (!character) return
         setIsRollOpen(true)
-        setIsRolling(false)
+        setIsRolling(true)
+        setRollResult(null)
+        try {
+            const response = await api.post("/actions/attribute-test", {
+                character_id: character.id,
+                attribute,
+                use_abilities: options?.useAbilities ?? [],
+                context: options?.context,
+                dc: options?.successMin
+            })
+            const data = response.data ?? {}
+            if (typeof data.effort_points === "number") {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    return { ...prev, effort_points: data.effort_points }
+                })
+            }
+
+            const dice = Array.isArray(data.dice)
+                ? data.dice.filter((value: unknown): value is number => typeof value === "number")
+                : []
+            const attributeKey = typeof data.attribute === "string" ? data.attribute : attribute
+            const attributeLabel =
+                attributeKeyLabelMap[attributeKey as keyof typeof attributeKeyLabelMap]
+                ?? formatEnum(attributeKey)
+            const appliedAbilities = Array.isArray(data.applied_abilities)
+                ? data.applied_abilities.filter((name: unknown): name is string => typeof name === "string")
+                : []
+            const appliedSaberPoder = appliedAbilities.some(
+                (name) => normalizeText(name) === "saber e poder"
+            )
+            const bonusValue = Number(data.bonus ?? 0)
+
+            setIsTrilhaCertaPromptOpen(false)
+            setRollResult({
+                expertise: attributeLabel,
+                attribute: attributeLabel,
+                attribute_value: Number(data.attribute_value ?? 0),
+                dice_count: Number(data.dice_count ?? dice.length),
+                dice,
+                treino: 0,
+                extra: 0,
+                bonus: bonusValue,
+                total: Number(data.total ?? 0),
+                roll_mode: data.roll_mode,
+                success_min: options?.successMin,
+                success_label: options?.successLabel,
+                extra_bonus: appliedSaberPoder && bonusValue ? bonusValue : undefined,
+                extra_label: appliedSaberPoder ? "Saber é Poder" : undefined
+            })
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao rolar atributo")
+        } finally {
+            setIsRolling(false)
+        }
     }
 
-    const handleRollAttribute = (attribute: keyof typeof attributeKeyLabelMap, value: number) => {
+    const handleRollAttribute = async (attribute: keyof typeof attributeKeyLabelMap, value: number) => {
         if (attribute === "intellect") {
             if (saberPoderActive) {
+                if (saberPoderCost > currentEffort) {
+                    alert("PE insuficiente para Saber é Poder.")
+                    return
+                }
                 setSaberPoderActive(false)
-                performAttributeRoll(attribute, value, { value: 5, label: "Saber é Poder" })
+                await performAttributeRoll(attribute, {
+                    useAbilities: ["Saber é Poder"]
+                })
                 return
             }
             if (hasSaberPoder && currentEffort >= saberPoderCost) {
@@ -2214,122 +2167,196 @@ export default function CharacterSheet() {
                 return
             }
         }
-        performAttributeRoll(attribute, value)
+        await performAttributeRoll(attribute)
     }
 
-    const consumeSpecialAttack = (target: SpecialAttackTarget) => {
-        const pending = pendingSpecialAttack
-        if (!pending || pending.target !== target) return null
-        setPendingSpecialAttack(null)
-        return pending
-    }
+    const handleWeaponTestRoll = async (weapon: WeaponSummary) => {
+        if (!character) return
+        setIsRollOpen(true)
+        setIsRolling(true)
+        setRollResult(null)
 
-    const consumeDemolishingStrike = () => {
-        if (!pendingDemolishingStrike) return false
-        setPendingDemolishingStrike(false)
-        return true
-    }
-
-    const consumeConhecimentoAplicado = (expertiseName: string) => {
-        if (!conhecimentoAplicadoActive) return false
-        const normalized = normalizeText(expertiseName)
-        if (normalized === "luta" || normalized === "pontaria") return false
-        setConhecimentoAplicadoActive(false)
-        return true
-    }
-
-    const handleWeaponTestRoll = (weapon: WeaponSummary) => {
-        const expertiseName =
+        const attackType = weapon.id === UNARMED_WEAPON_ID
+            ? "unarmed"
+            : isFirearmWeapon(weapon)
+                ? "firearm"
+                : (weapon.weapon_range === "corpo_a_corpo" ? "melee" : "ranged")
+        const skill =
             weapon.weapon_range === "corpo_a_corpo" ? "luta" : "pontaria"
-        const pending = consumeSpecialAttack("attack")
-        const bonusParts: { value: number; label: string }[] = []
-        if (pending?.bonus) {
-            bonusParts.push({
-                value: pending.bonus,
-                label: pending.label ?? "Ataque Especial"
-            })
-        }
-        const extraBonus =
-            bonusParts.length === 0
-                ? undefined
-                : bonusParts.length === 1
-                    ? { value: bonusParts[0].value, label: bonusParts[0].label }
-                    : {
-                        value: bonusParts.reduce((sum, part) => sum + part.value, 0),
-                        label: bonusParts.map((part) => part.label).join(" + ")
-                    }
-        const dicePenalty =
-            (defensiveCombatActive ? 1 : 0) + (dualWieldActive ? 1 : 0)
-        handleRollExpertise(
-            expertiseName,
-            extraBonus,
-            dicePenalty
-        )
-    }
 
-    const handleWeaponDamageRoll = (weapon: WeaponSummary, isCritical: boolean) => {
-        const effectiveDamageFormula =
-            weapon.id === UNARMED_WEAPON_ID
-                ? getUnarmedDamageFormula(character?.nex_total ?? 0, hasArtistaMarcial)
-                : weapon.damage_formula
-        const parsed = parseDamageFormula(effectiveDamageFormula)
-        if (!parsed) {
-            alert("Formato de dano invalido. Use XdY, por exemplo: 3d6.")
-            return
+        const pending =
+            pendingSpecialAttack && pendingSpecialAttack.target === "attack"
+                ? pendingSpecialAttack
+                : null
+
+        const useAbilities: string[] = []
+        if (defensiveCombatActive) {
+            useAbilities.push("Combate Defensivo")
         }
-        const pending = consumeSpecialAttack("damage")
-        const demolishingStrikeUsed = consumeDemolishingStrike()
-        const multiplier = isCritical
-            ? Math.max(1, Number(weapon.critical_multiplier) || 1)
-            : 1
-        const extraDice =
-            (demolishingStrikeUsed ? 2 : 0)
-            + (hasGolpePesado && weapon.weapon_range === "corpo_a_corpo" ? 1 : 0)
-        const diceCount = parsed.diceCount * multiplier + extraDice
-        const dice = rollDice(diceCount, parsed.diceSides)
-        const baseTotal = dice.reduce((sum, value) => sum + value, 0)
-        const bonusParts: { label: string; value: number }[] = []
-        const notes: string[] = []
-        if (pending?.bonus) {
-            bonusParts.push({
-                label: pending.label ?? "Ataque Especial",
-                value: pending.bonus
+        if (dualWieldActive) {
+            useAbilities.push("Combater Com Duas Armas")
+        }
+        if (pending) {
+            useAbilities.push("Ataque Especial")
+        }
+        if (triggerHoldActive) {
+            useAbilities.push("Segurar Gatilho")
+        }
+
+        try {
+            const response = await api.post("/actions/attack-roll", {
+                character_id: character.id,
+                attack_type: attackType,
+                skill,
+                use_abilities: useAbilities,
+                attack_special_target: pending ? "attack" : undefined,
+                attack_special_choice: pending
+                    ? { pe_cost: pending.peCost, bonus: pending.bonus }
+                    : undefined
             })
-        }
-        if (demolishingStrikeUsed) {
-            notes.push(`Golpe Demolidor: +2d${parsed.diceSides}`)
-        }
-        if (hasGolpePesado && weapon.weapon_range === "corpo_a_corpo") {
-            notes.push(`Golpe Pesado: +1d${parsed.diceSides}`)
-        }
-        if (hasBalisticaAvancada && isTacticalWeapon(weapon)) {
-            bonusParts.push({ label: "Balística Avançada", value: 2 })
-        }
-        if (hasNinjaUrbano && isTacticalWeapon(weapon) && !isFirearmWeapon(weapon)) {
-            bonusParts.push({ label: "Ninja Urbano", value: 2 })
-        }
-        if (hasTiroCerteiro && weapon.weapon_range !== "corpo_a_corpo") {
-            const agilityBonus = Number(character?.atrib_agility ?? 0)
-            if (agilityBonus) {
-                bonusParts.push({
-                    label: "Tiro Certeiro (Agilidade)",
-                    value: agilityBonus
+
+            const data = response.data ?? {}
+            if (typeof data.effort_points === "number") {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    return { ...prev, effort_points: data.effort_points }
                 })
             }
+
+            const attackRoll = data.attack_roll ?? {}
+            const dice = Array.isArray(attackRoll.dice)
+                ? attackRoll.dice.filter((value: unknown): value is number => typeof value === "number")
+                : []
+            const attributeKey = expertiseAttributeMap[skill]
+            const attributeLabel = attributeKey
+                ? (attributeLabelMap[attributeKey] ?? formatEnum(attributeKey))
+                : ""
+            setRollResult({
+                expertise: expertiseLabelMap[skill] ?? formatEnum(skill),
+                attribute: attributeLabel,
+                attribute_value: Number(attackRoll.attribute_value ?? 0),
+                dice_count: Number(attackRoll.dice_count ?? dice.length),
+                dice,
+                treino: Number(attackRoll.treino ?? 0),
+                extra: Number(attackRoll.extra ?? 0),
+                bonus: Number(attackRoll.bonus ?? 0),
+                total: Number(attackRoll.total ?? 0),
+                roll_mode: attackRoll.roll_mode
+            })
+
+            if (pending) {
+                setPendingSpecialAttack(null)
+            }
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao rolar ataque")
+        } finally {
+            setIsRolling(false)
         }
-        const bonus = bonusParts.reduce((sum, part) => sum + part.value, 0)
-        const total = baseTotal + bonus
-        setWeaponRollResult({
-            title: `${isCritical ? "Crítico" : "Dano"} - ${capitalizeFirst(weapon.name)}`,
-            formula: `${diceCount}d${parsed.diceSides}${bonus ? `+${bonus}` : ""}`,
-            dice,
-            total,
-            bonus: bonus || undefined,
-            bonusLabel: bonusParts.length === 1 ? bonusParts[0].label : undefined,
-            bonusParts: bonusParts.length > 0 ? bonusParts : undefined,
-            notes: notes.length > 0 ? notes : undefined
-        })
-        setIsWeaponRollOpen(true)
+    }
+
+    const handleWeaponDamageRoll = async (weapon: WeaponSummary, isCritical: boolean) => {
+        if (!character) return
+        try {
+            const effectiveDamageFormula =
+                weapon.id === UNARMED_WEAPON_ID
+                    ? getUnarmedDamageFormula(character.nex_total, hasArtistaMarcial)
+                    : weapon.damage_formula
+            const parsed = parseDamageFormula(effectiveDamageFormula)
+            if (!parsed) {
+                alert("Formato de dano invalido. Use XdY, por exemplo: 3d6.")
+                return
+            }
+
+            const attackType = weapon.id === UNARMED_WEAPON_ID
+                ? "unarmed"
+                : isFirearmWeapon(weapon)
+                    ? "firearm"
+                    : (weapon.weapon_range === "corpo_a_corpo" ? "melee" : "ranged")
+
+            const pending =
+                pendingSpecialAttack && pendingSpecialAttack.target === "damage"
+                    ? pendingSpecialAttack
+                    : null
+            const demolishingStrikeUsed = pendingDemolishingStrike
+
+            const useAbilities: string[] = []
+            if (pending) {
+                useAbilities.push("Ataque Especial")
+            }
+            if (demolishingStrikeUsed) {
+                useAbilities.push("Golpe Demolidor")
+            }
+            if (triggerHoldActive) {
+                useAbilities.push("Segurar Gatilho")
+            }
+
+            const weaponTags: string[] = []
+            if (isTacticalWeapon(weapon)) {
+                if (isFirearmWeapon(weapon)) {
+                    weaponTags.push("tactical_firearm")
+                } else if (weapon.weapon_range === "corpo_a_corpo") {
+                    weaponTags.push("tactical_melee")
+                } else {
+                    weaponTags.push("tactical_ranged_non_firearm")
+                }
+            }
+
+            const response = await api.post("/actions/damage-roll", {
+                character_id: character.id,
+                attack_type: attackType,
+                weapon_name: weapon.name,
+                weapon_damage: effectiveDamageFormula,
+                weapon_tags: weaponTags,
+                use_abilities: useAbilities,
+                context: demolishingStrikeUsed ? { break_maneuver: true } : undefined,
+                is_critical: isCritical,
+                critical_multiplier: Number(weapon.critical_multiplier) || 1,
+                attack_special_target: pending ? "damage" : undefined,
+                attack_special_choice: pending
+                    ? { pe_cost: pending.peCost, bonus: pending.bonus }
+                    : undefined
+            })
+
+            const data = response.data ?? {}
+            if (typeof data.effort_points === "number") {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    return { ...prev, effort_points: data.effort_points }
+                })
+            }
+
+            const damageRoll = data.damage_roll ?? {}
+            const dice = Array.isArray(damageRoll.dice)
+                ? damageRoll.dice.filter((value: unknown): value is number => typeof value === "number")
+                : []
+            const bonus = Number(damageRoll.bonus ?? 0)
+            const total = Number(damageRoll.total ?? 0)
+            const notes = Array.isArray(data.notes)
+                ? data.notes.filter((note: unknown): note is string => typeof note === "string")
+                : []
+
+            setWeaponRollResult({
+                title: `${isCritical ? "Crítico" : "Dano"} - ${capitalizeFirst(weapon.name)}`,
+                formula: String(damageRoll.formula ?? `${parsed.diceCount}d${parsed.diceSides}`),
+                dice,
+                total,
+                bonus: bonus || undefined,
+                bonusLabel: bonus ? "Bônus total" : undefined,
+                notes: notes.length > 0 ? notes : undefined
+            })
+            setIsWeaponRollOpen(true)
+
+            if (pending) {
+                setPendingSpecialAttack(null)
+            }
+            if (demolishingStrikeUsed) {
+                setPendingDemolishingStrike(false)
+            }
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao rolar dano")
+        }
     }
 
     const getWeaponTestFormula = (weapon: WeaponSummary, extraBonus = 0) => {
@@ -3765,9 +3792,6 @@ export default function CharacterSheet() {
             alert("PE insuficiente para usar Ataque Especial.")
             return
         }
-        if (specialAttackOption.peCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -specialAttackOption.peCost)
-        }
         setPendingSpecialAttack({
             bonus: specialAttackOption.bonus,
             peCost: specialAttackOption.peCost,
@@ -3779,9 +3803,6 @@ export default function CharacterSheet() {
 
     const handleCancelPendingSpecialAttack = () => {
         if (!pendingSpecialAttack) return
-        if (pendingSpecialAttack.peCost > 0) {
-            handleStatusChange("effort_points", "effort_max", pendingSpecialAttack.peCost)
-        }
         setPendingSpecialAttack(null)
     }
 
@@ -3821,17 +3842,11 @@ export default function CharacterSheet() {
             alert("PE insuficiente para Conhecimento Aplicado.")
             return
         }
-        if (conhecimentoAplicadoCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -conhecimentoAplicadoCost)
-        }
         setConhecimentoAplicadoActive(true)
     }
 
     const handleCancelConhecimentoAplicado = () => {
         if (!conhecimentoAplicadoActive) return
-        if (conhecimentoAplicadoCost > 0) {
-            handleStatusChange("effort_points", "effort_max", conhecimentoAplicadoCost)
-        }
         setConhecimentoAplicadoActive(false)
     }
 
@@ -3841,17 +3856,11 @@ export default function CharacterSheet() {
             alert("PE insuficiente para Eclético.")
             return
         }
-        if (ecleticoCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -ecleticoCost)
-        }
         setEcleticoActive(true)
     }
 
     const handleCancelEcletico = () => {
         if (!ecleticoActive) return
-        if (ecleticoCost > 0) {
-            handleStatusChange("effort_points", "effort_max", ecleticoCost)
-        }
         setEcleticoActive(false)
     }
 
@@ -3861,17 +3870,11 @@ export default function CharacterSheet() {
             alert("PE insuficiente para Saber é Poder.")
             return
         }
-        if (saberPoderCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -saberPoderCost)
-        }
         setSaberPoderActive(true)
     }
 
     const handleCancelSaberPoder = () => {
         if (!saberPoderActive) return
-        if (saberPoderCost > 0) {
-            handleStatusChange("effort_points", "effort_max", saberPoderCost)
-        }
         setSaberPoderActive(false)
     }
 
@@ -3881,17 +3884,11 @@ export default function CharacterSheet() {
             alert("PE insuficiente para Golpe Demolidor.")
             return
         }
-        if (demolishingStrikeCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -demolishingStrikeCost)
-        }
         setPendingDemolishingStrike(true)
     }
 
     const handleCancelDemolishingStrike = () => {
         if (!pendingDemolishingStrike) return
-        if (demolishingStrikeCost > 0) {
-            handleStatusChange("effort_points", "effort_max", demolishingStrikeCost)
-        }
         setPendingDemolishingStrike(false)
     }
 
@@ -3970,13 +3967,14 @@ export default function CharacterSheet() {
         if (nerdCost > 0) {
             handleStatusChange("effort_points", "effort_max", -nerdCost)
         }
-        requestRollExpertise("atualidades", undefined, 0, {
+        requestRollExpertise("atualidades", {
             successMin: 20,
             successLabel: "Nerd"
         })
     }
 
-    const handleActivateTrilhaCerta = () => {
+    const handleActivateTrilhaCerta = async () => {
+        if (!character) return false
         const nextCost = trilhaCertaBaseCost + trilhaCertaBonusDice
         if (nextCost > currentEffort) {
             alert("PE insuficiente para Na Trilha Certa.")
@@ -3988,17 +3986,47 @@ export default function CharacterSheet() {
             alert("Custo excede o PE por rodada.")
             return false
         }
-        if (nextCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -nextCost)
+        try {
+            const response = await api.post("/actions/next-test-bonus", {
+                character_id: character.id,
+                ability_name: "Na Trilha Certa",
+                dice: 1
+            })
+            const data = response.data ?? {}
+            if (typeof data.effort_points === "number") {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    return { ...prev, effort_points: data.effort_points }
+                })
+            }
+            if (typeof data.next_test_bonus === "number") {
+                setTrilhaCertaBonusDice(data.next_test_bonus)
+            } else {
+                setTrilhaCertaBonusDice((prev) => prev + 1)
+            }
+            setOpportunityToast(`Habilidade Na Trilha Certa ativa, gasto ${nextCost} PE`)
+            return true
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao ativar Na Trilha Certa.")
+            return false
         }
-        setTrilhaCertaBonusDice((prev) => prev + 1)
-        setOpportunityToast(`Habilidade Na Trilha Certa ativa, gasto ${nextCost} PE`)
-        return true
     }
 
     const handleDeactivateTrilhaCerta = () => {
-        setTrilhaCertaBonusDice(0)
         setIsTrilhaCertaPromptOpen(false)
+        if (!character) {
+            setTrilhaCertaBonusDice(0)
+            return
+        }
+        api.post("/actions/next-test-bonus/clear", {
+            character_id: character.id
+        }).then(() => {
+            setTrilhaCertaBonusDice(0)
+        }).catch((err) => {
+            console.error(err)
+            alert("Erro ao encerrar Na Trilha Certa.")
+        })
     }
 
     const handleShowTrilhaCertaInfo = () => {
@@ -4019,27 +4047,26 @@ export default function CharacterSheet() {
             setPendingSaberPoder(null)
             return
         }
-        if (applyBonus && saberPoderCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -saberPoderCost)
-        }
+
         setIsSaberPoderPromptOpen(false)
         setPendingSaberPoder(null)
 
-        const bonus = applyBonus
-            ? { value: 5, label: "Saber é Poder" }
-            : undefined
-
         if (pending.kind === "attribute") {
-            performAttributeRoll(pending.attribute, pending.value, bonus)
+            const nextOptions = applyBonus
+                ? { useAbilities: ["Saber é Poder"] }
+                : undefined
+            performAttributeRoll(pending.attribute, nextOptions)
             return
         }
 
-        const updatedBonus = bonus ? mergeExtraBonus(pending.extraBonus, bonus) : pending.extraBonus
+        const nextOptions = applyBonus
+            ? mergeSkillTestOptions(pending.options, {
+                useAbilities: ["Saber é Poder"]
+            })
+            : pending.options
         requestRollExpertise(
             pending.expertiseName,
-            updatedBonus,
-            pending.dicePenalty,
-            pending.options,
+            nextOptions,
             false,
             false,
             true
@@ -4054,17 +4081,14 @@ export default function CharacterSheet() {
         }
         setIsEnvoltoMisterioPromptOpen(false)
         setPendingEnvoltoMisterio(null)
-        const updatedBonus = applyBonus
-            ? mergeExtraBonus(pending.extraBonus, {
-                value: 5,
-                label: "Envolto em Mistério"
+        const nextOptions = applyBonus
+            ? mergeSkillTestOptions(pending.options, {
+                useAbilities: ["Envolto em Mistério"]
             })
-            : pending.extraBonus
+            : pending.options
         requestRollExpertise(
             pending.expertiseName,
-            updatedBonus,
-            pending.dicePenalty,
-            pending.options,
+            nextOptions,
             true,
             false,
             true
@@ -4079,17 +4103,14 @@ export default function CharacterSheet() {
         }
         setIsIdentificacaoParanormalPromptOpen(false)
         setPendingIdentificacaoParanormal(null)
-        const updatedBonus = applyBonus
-            ? mergeExtraBonus(pending.extraBonus, {
-                value: 10,
-                label: "Identificação Paranormal"
+        const nextOptions = applyBonus
+            ? mergeSkillTestOptions(pending.options, {
+                useAbilities: ["Identificação Paranormal"]
             })
-            : pending.extraBonus
+            : pending.options
         requestRollExpertise(
             pending.expertiseName,
-            updatedBonus,
-            pending.dicePenalty,
-            pending.options,
+            nextOptions,
             false,
             true,
             true
@@ -4104,16 +4125,12 @@ export default function CharacterSheet() {
         }
         setIsPrimeiraImpressaoPromptOpen(false)
         setPendingPrimeiraImpressao(null)
-        handleRollExpertise(
-            pending.expertiseName,
-            pending.extraBonus,
-            pending.dicePenalty,
-            {
-                ...pending.options,
-                extraDice: applyBonus ? 2 : 0,
-                extraDiceLabel: applyBonus ? "Primeira Impressão" : undefined
-            }
-        )
+        const nextOptions = applyBonus
+            ? mergeSkillTestOptions(pending.options, {
+                context: { is_first_test_in_scene: true }
+            })
+            : pending.options
+        handleRollExpertise(pending.expertiseName, nextOptions)
     }
 
     const handleSelectElementSpecialist = (value: string) => {
@@ -4190,9 +4207,6 @@ export default function CharacterSheet() {
             alert("PE insuficiente para Perito.")
             return
         }
-        if (option.peCost > 0) {
-            handleStatusChange("effort_points", "effort_max", -option.peCost)
-        }
         setPendingPerito({ peCost: option.peCost, diceSides: option.diceSides })
         setIsPeritoUseOpen(false)
     }
@@ -4255,8 +4269,6 @@ export default function CharacterSheet() {
         })
         requestRollExpertise(
             "ocultismo",
-            undefined,
-            0,
             {
                 successMin: dt,
                 successLabel: `DT Ritual (${dt})`
@@ -4887,20 +4899,7 @@ export default function CharacterSheet() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        const isResistance = resistanceExpertiseSet.has(name)
-                                        const bonusValue =
-                                            sentidoTaticoActive && isResistance
-                                                ? Number(character.atrib_intellect) || 0
-                                                : 0
-                                        requestRollExpertise(
-                                            name,
-                                            bonusValue > 0
-                                                ? {
-                                                    value: bonusValue,
-                                                    label: "Sentido Tático (Intelecto)"
-                                                }
-                                                : undefined
-                                        )
+                                        requestRollExpertise(name)
                                     }}
                                     className="flex-1 bg-zinc-900/70 border border-zinc-700 rounded p-2 text-left hover:border-blue-500 transition-colors"
                                     title="Rolar perícia"

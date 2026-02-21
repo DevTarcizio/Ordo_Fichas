@@ -8,6 +8,7 @@ import { formatEnum } from "../utils"
 import type { CharacterSummary } from "../types/character"
 import CompactStatusBar from "../components/CompactStatusBar"
 import {
+    attributeKeyLabelMap,
     attributeLabelMap,
     expertiseAttributeMap,
     statusConfigs,
@@ -33,8 +34,11 @@ const getStatusValue = (
 }
 
 const actionTypeLabels: Record<string, string> = {
+    attribute_test: "Teste de Atributo",
     skill_test: "Teste de Perícia",
     attack: "Ataque",
+    attack_roll: "Teste de Ataque",
+    damage_roll: "Dano",
     calm: "Acalmar"
 }
 
@@ -59,7 +63,11 @@ const normalizeSkillKey = (value: unknown) => {
 
 const resolveAttributeLabel = (skill: unknown, attributeLabel?: unknown) => {
     if (typeof attributeLabel === "string" && attributeLabel.trim().length > 0) {
-        return attributeLabel
+        const normalized = normalizeSkillKey(attributeLabel)
+        if (normalized && normalized in attributeKeyLabelMap) {
+            return attributeKeyLabelMap[normalized as keyof typeof attributeKeyLabelMap]
+        }
+        return formatEnum(attributeLabel)
     }
     const normalized = normalizeSkillKey(skill)
     if (!normalized) return ""
@@ -68,12 +76,23 @@ const resolveAttributeLabel = (skill: unknown, attributeLabel?: unknown) => {
     return attributeLabelMap[attributeKey] ?? formatEnum(attributeKey)
 }
 
-const computeResultValue = (dice: unknown, bonus: unknown, fallbackTotal: unknown) => {
+const computeResultValue = (
+    dice: unknown,
+    bonus: unknown,
+    fallbackTotal: unknown,
+    rollMode?: "best" | "worst" | "sum"
+) => {
     const values = Array.isArray(dice)
         ? dice.filter((item): item is number => typeof item === "number")
         : []
     const bonusValue = typeof bonus === "number" ? bonus : 0
     if (values.length > 0) {
+        if (rollMode === "sum") {
+            return values.reduce((sum, value) => sum + value, 0) + bonusValue
+        }
+        if (rollMode === "worst") {
+            return Math.min(...values) + bonusValue
+        }
         return Math.max(...values) + bonusValue
     }
     if (typeof fallbackTotal === "number") {
@@ -82,66 +101,282 @@ const computeResultValue = (dice: unknown, bonus: unknown, fallbackTotal: unknow
     return null
 }
 
+const normalizeDiceValues = (dice: unknown) => {
+    if (!Array.isArray(dice)) return []
+    return dice.filter((item): item is number => typeof item === "number")
+}
+
+const getD20ResultValue = (dice: number[], rollMode?: "best" | "worst") => {
+    if (dice.length === 0) return 0
+    return rollMode === "worst" ? Math.min(...dice) : Math.max(...dice)
+}
+
+const buildDiceBreakdown = (label: string, dice: number[], resultValue: number) => {
+    if (dice.length === 0) return ""
+    return `${label}: ${dice.join(" + ")} = ${resultValue}`
+}
+
+const buildResultLine = (
+    label: string,
+    diceResult: number,
+    bonusValue: number,
+    totalValue: number
+) => {
+    if (diceResult === null || diceResult === undefined) return ""
+    if (diceResult === 0 && bonusValue === 0 && totalValue === 0) return ""
+    if (bonusValue) {
+        return `${label}: ${diceResult} + ${bonusValue} = ${totalValue}`
+    }
+    return `${label}: ${diceResult}`
+}
+
 const buildLogSummary = (log: ActionLogEntry) => {
     const payload = (log.payload ?? {}) as Record<string, unknown>
     if (log.action_type === "skill_test") {
         const skillLabel = formatEnum(payload.skill)
         const attributeLabel = resolveAttributeLabel(payload.skill, payload.attribute)
-        const total = typeof payload.total === "number" ? payload.total : null
         const dc = typeof payload.dc === "number" ? payload.dc : null
         const success = typeof payload.success === "boolean" ? payload.success : null
-        const notes = typeof payload.notes === "string" ? payload.notes : ""
+        const notes = Array.isArray(payload.notes)
+            ? payload.notes.filter((note) => typeof note === "string").join(" · ")
+            : typeof payload.notes === "string"
+                ? payload.notes
+                : ""
+        const dice = normalizeDiceValues(payload.dice)
+        const diceCount = typeof payload.dice_count === "number" ? payload.dice_count : dice.length
+        const bonusValue = typeof payload.bonus === "number" ? payload.bonus : 0
+        const rollMode = payload.roll_mode === "worst" ? "worst" : "best"
+        const diceResult = getD20ResultValue(dice, rollMode)
+        const computedTotal = typeof payload.total === "number" ? payload.total : diceResult + bonusValue
+        const breakdown = buildDiceBreakdown(`${diceCount}d20`, dice, diceResult)
+        const detail = buildResultLine("Resultado", diceResult, bonusValue, computedTotal)
         const title = [skillLabel, attributeLabel].filter(Boolean).join(" · ")
-        const result = [
-            total !== null ? `Total ${total}` : null,
+        const extra = [
+            dc !== null ? `DT ${dc}` : null,
+            success === null ? null : success ? "Sucesso" : "Falha",
+            notes || null
+        ].filter(Boolean).join(" · ")
+        const resultValue = computeResultValue(
+            payload.dice,
+            payload.bonus,
+            payload.total,
+            payload.roll_mode === "worst" ? "worst" : "best"
+        )
+        return {
+            title,
+            result: "",
+            extra,
+            resultValue,
+            breakdownLines: breakdown ? [breakdown] : [],
+            detailLines: detail ? [detail] : []
+        }
+    }
+
+    if (log.action_type === "attribute_test") {
+        const attributeLabel = resolveAttributeLabel(payload.attribute, payload.attribute)
+        const dc = typeof payload.dc === "number" ? payload.dc : null
+        const success = typeof payload.success === "boolean" ? payload.success : null
+        const dice = normalizeDiceValues(payload.dice)
+        const diceCount = typeof payload.dice_count === "number" ? payload.dice_count : dice.length
+        const bonusValue = typeof payload.bonus === "number" ? payload.bonus : 0
+        const rollMode = payload.roll_mode === "worst" ? "worst" : "best"
+        const diceResult = getD20ResultValue(dice, rollMode)
+        const computedTotal = typeof payload.total === "number" ? payload.total : diceResult + bonusValue
+        const breakdown = buildDiceBreakdown(`${diceCount}d20`, dice, diceResult)
+        const detail = buildResultLine("Resultado", diceResult, bonusValue, computedTotal)
+        const title = attributeLabel || actionTypeLabels.attribute_test
+        const extra = [
             dc !== null ? `DT ${dc}` : null,
             success === null ? null : success ? "Sucesso" : "Falha"
         ].filter(Boolean).join(" · ")
-        const extra = notes
-        const resultValue = computeResultValue(payload.dice, payload.bonus, payload.total)
-        return { title, result, extra, resultValue }
+        const resultValue = computeResultValue(
+            payload.dice,
+            payload.bonus,
+            payload.total,
+            payload.roll_mode === "worst" ? "worst" : "best"
+        )
+        return {
+            title,
+            result: "",
+            extra,
+            resultValue,
+            breakdownLines: breakdown ? [breakdown] : [],
+            detailLines: detail ? [detail] : []
+        }
     }
 
     if (log.action_type === "attack") {
         const skillLabel = formatEnum(payload.skill)
-        const attackType = typeof payload.attack_type === "string" ? payload.attack_type : ""
         const attackRoll = payload.attack_roll as Record<string, unknown> | undefined
         const damageRoll = payload.damage_roll as Record<string, unknown> | undefined
-        const attackTotal = attackRoll && typeof attackRoll.total === "number" ? attackRoll.total : null
-        const damageTotal = damageRoll && typeof damageRoll.total === "number" ? damageRoll.total : null
         const attributeLabel = resolveAttributeLabel(payload.skill)
         const title = [skillLabel, attributeLabel].filter(Boolean).join(" · ")
-        const result = [
-            attackTotal !== null ? `Ataque ${attackTotal}` : null,
-            damageTotal !== null ? `Dano ${damageTotal}` : null
-        ].filter(Boolean).join(" · ")
-        const resultValue = computeResultValue(attackRoll?.dice, attackRoll?.bonus, attackRoll?.total)
-        return { title, result, extra: "", resultValue }
+
+        const attackDice = normalizeDiceValues(attackRoll?.dice)
+        const attackDiceCount = typeof attackRoll?.dice_count === "number"
+            ? (attackRoll?.dice_count as number)
+            : attackDice.length
+        const attackBonus = typeof attackRoll?.bonus === "number" ? attackRoll.bonus : 0
+        const attackRollMode = attackRoll?.roll_mode === "worst" ? "worst" : "best"
+        const attackDiceResult = getD20ResultValue(attackDice, attackRollMode)
+        const attackTotal = typeof attackRoll?.total === "number"
+            ? attackRoll.total
+            : attackDiceResult + attackBonus
+        const attackBreakdown = buildDiceBreakdown(
+            `Ataque ${attackDiceCount}d20`,
+            attackDice,
+            attackDiceResult
+        )
+        const attackDetail = buildResultLine(
+            "Resultado ataque",
+            attackDiceResult,
+            attackBonus,
+            attackTotal
+        )
+
+        const damageDice = normalizeDiceValues(damageRoll?.dice)
+        const damageFormula = typeof damageRoll?.formula === "string" ? damageRoll.formula : ""
+        const damageBonus = typeof damageRoll?.bonus === "number" ? damageRoll.bonus : 0
+        const damageDiceTotal = damageDice.reduce((sum, value) => sum + value, 0)
+        const damageTotal = typeof damageRoll?.total === "number"
+            ? damageRoll.total
+            : damageDiceTotal + damageBonus
+        const damageBreakdown = buildDiceBreakdown(
+            `Dano ${damageFormula || `${damageDice.length}d?`}`,
+            damageDice,
+            damageDiceTotal
+        )
+        const damageDetail = buildResultLine(
+            "Resultado dano",
+            damageDiceTotal,
+            damageBonus,
+            damageTotal
+        )
+        const resultValue = computeResultValue(
+            attackRoll?.dice,
+            attackRoll?.bonus,
+            attackRoll?.total,
+            attackRoll?.roll_mode === "worst" ? "worst" : "best"
+        )
+        return {
+            title,
+            result: "",
+            extra: "",
+            resultValue,
+            breakdownLines: [attackBreakdown, damageBreakdown].filter(Boolean),
+            detailLines: [attackDetail, damageDetail].filter(Boolean)
+        }
+    }
+
+    if (log.action_type === "attack_roll") {
+        const skillLabel = formatEnum(payload.skill)
+        const attackRoll = payload.attack_roll as Record<string, unknown> | undefined
+        const attributeLabel = resolveAttributeLabel(payload.skill)
+        const title = [skillLabel, attributeLabel].filter(Boolean).join(" · ")
+        const attackDice = normalizeDiceValues(attackRoll?.dice)
+        const diceCount = typeof attackRoll?.dice_count === "number"
+            ? (attackRoll?.dice_count as number)
+            : attackDice.length
+        const bonusValue = typeof attackRoll?.bonus === "number" ? attackRoll.bonus : 0
+        const rollMode = attackRoll?.roll_mode === "worst" ? "worst" : "best"
+        const diceResult = getD20ResultValue(attackDice, rollMode)
+        const computedTotal = typeof attackRoll?.total === "number"
+            ? attackRoll.total
+            : diceResult + bonusValue
+        const breakdown = buildDiceBreakdown(`${diceCount}d20`, attackDice, diceResult)
+        const detail = buildResultLine("Resultado", diceResult, bonusValue, computedTotal)
+        const resultValue = computeResultValue(
+            attackRoll?.dice,
+            attackRoll?.bonus,
+            attackRoll?.total,
+            attackRoll?.roll_mode === "worst" ? "worst" : "best"
+        )
+        return {
+            title,
+            result: "",
+            extra: "",
+            resultValue,
+            breakdownLines: breakdown ? [breakdown] : [],
+            detailLines: detail ? [detail] : []
+        }
+    }
+
+    if (log.action_type === "damage_roll") {
+        const damageRoll = payload.damage_roll as Record<string, unknown> | undefined
+        const total = damageRoll && typeof damageRoll.total === "number" ? damageRoll.total : null
+        const weaponName = typeof payload.weapon_name === "string" ? payload.weapon_name : ""
+        const title = ""
+        const result = ""
+        const extra = weaponName ? `Arma: ${weaponName}` : ""
+        const diceValues = normalizeDiceValues(damageRoll?.dice)
+        const formula = typeof damageRoll?.formula === "string" ? damageRoll?.formula : ""
+        const diceTotal = diceValues.reduce((sum, value) => sum + value, 0)
+        const breakdown = buildDiceBreakdown(
+            formula || `${diceValues.length}d?`,
+            diceValues,
+            diceTotal
+        )
+        const bonusValue = typeof damageRoll?.bonus === "number" ? damageRoll.bonus : 0
+        const computedTotal = typeof total === "number" ? total : diceTotal + bonusValue
+        const detail = buildResultLine("Resultado", diceTotal, bonusValue, computedTotal)
+        return {
+            title,
+            result,
+            extra,
+            resultValue: null,
+            breakdownLines: breakdown ? [breakdown] : [],
+            detailLines: detail ? [detail] : []
+        }
     }
 
     if (log.action_type === "calm") {
         const skillLabel = formatEnum(payload.skill)
-        const total = typeof payload.total === "number" ? payload.total : null
         const dc = typeof payload.dc === "number" ? payload.dc : null
         const success = typeof payload.success === "boolean" ? payload.success : null
         const sanity = typeof payload.sanity_restored === "number" ? payload.sanity_restored : null
         const attributeLabel = resolveAttributeLabel(payload.skill)
         const title = [skillLabel || "Acalmar", attributeLabel].filter(Boolean).join(" · ")
-        const result = [
-            total !== null ? `Total ${total}` : null,
+        const dice = normalizeDiceValues(payload.dice)
+        const diceCount = typeof payload.dice_count === "number" ? payload.dice_count : dice.length
+        const bonusValue = typeof payload.bonus === "number" ? payload.bonus : 0
+        const rollMode = payload.roll_mode === "worst" ? "worst" : "best"
+        const diceResult = getD20ResultValue(dice, rollMode)
+        const computedTotal = typeof payload.total === "number" ? payload.total : diceResult + bonusValue
+        const breakdown = buildDiceBreakdown(`${diceCount}d20`, dice, diceResult)
+        const detail = buildResultLine("Resultado", diceResult, bonusValue, computedTotal)
+        const extra = [
             dc !== null ? `DT ${dc}` : null,
-            success === null ? null : success ? "Sucesso" : "Falha"
+            success === null ? null : success ? "Sucesso" : "Falha",
+            sanity !== null ? `Sanidade restaurada: ${sanity}` : null
         ].filter(Boolean).join(" · ")
-        const extra = sanity !== null ? `Sanidade restaurada: ${sanity}` : ""
-        const resultValue = computeResultValue(payload.dice, payload.bonus, payload.total)
-        return { title, result, extra, resultValue }
+        const resultValue = computeResultValue(
+            payload.dice,
+            payload.bonus,
+            payload.total,
+            payload.roll_mode === "worst" ? "worst" : "best"
+        )
+        return {
+            title,
+            result: "",
+            extra,
+            resultValue,
+            breakdownLines: breakdown ? [breakdown] : [],
+            detailLines: detail ? [detail] : []
+        }
     }
 
     const fallbackTitle = formatEnum(log.action_type)
     const fallbackKeys = Object.keys(payload)
     const extra = fallbackKeys.length ? `Campos: ${fallbackKeys.join(", ")}` : ""
     const resultValue = computeResultValue(payload.dice, payload.bonus, payload.total)
-    return { title: fallbackTitle, result: "", extra, resultValue }
+    return {
+        title: fallbackTitle,
+        result: "",
+        extra,
+        resultValue,
+        breakdownLines: [],
+        detailLines: []
+    }
 }
 
 type RealtimeCharacterStatus = {
@@ -195,7 +430,7 @@ export default function Dashboard() {
     const [actionLogs, setActionLogs] = useState<ActionLogEntry[]>([])
     const [isLoadingLogs, setIsLoadingLogs] = useState(false)
     const [logsError, setLogsError] = useState<string | null>(null)
-    const [masterTab, setMasterTab] = useState<"status" | "history">("status")
+    const [isResettingHistory, setIsResettingHistory] = useState(false)
     const isFetchingRef = useRef(false)
     const refreshTimerRef = useRef<number | null>(null)
     const wsRef = useRef<WebSocket | null>(null)
@@ -247,6 +482,22 @@ export default function Dashboard() {
         }
     }, [user])
 
+    const handleResetHistory = useCallback(async () => {
+        if (!user || user.role !== "master") return
+        const confirmReset = window.confirm("Deseja realmente limpar o histórico de testes?")
+        if (!confirmReset) return
+        try {
+            setIsResettingHistory(true)
+            await api.post("/actions/history/reset", {})
+            setActionLogs([])
+        } catch (err) {
+            console.error("Erro ao resetar histórico: ", err)
+            setLogsError("Erro ao resetar o histórico de testes.")
+        } finally {
+            setIsResettingHistory(false)
+        }
+    }, [user])
+
     const applyStatusUpdate = useCallback((status: RealtimeCharacterStatus) => {
         let didUpdate = false
         setCharacters((prev) => {
@@ -275,10 +526,9 @@ export default function Dashboard() {
 
     useEffect(() => {
         if (!user || user.role !== "master") return
-        if (masterTab !== "history") return
         if (actionLogs.length > 0 || isLoadingLogs) return
         void fetchActionLogs()
-    }, [user, masterTab, actionLogs.length, isLoadingLogs, fetchActionLogs])
+    }, [user, actionLogs.length, isLoadingLogs, fetchActionLogs])
 
     useEffect(() => {
         void fetchCharacters()
@@ -289,9 +539,7 @@ export default function Dashboard() {
 
         const refresh = () => {
             void fetchCharacters()
-            if (masterTab === "history") {
-                void fetchActionLogs()
-            }
+            void fetchActionLogs()
         }
 
         window.addEventListener("focus", refresh)
@@ -366,6 +614,11 @@ export default function Dashboard() {
                     return
                 }
 
+                if (data.type === "action_history_reset") {
+                    setActionLogs([])
+                    return
+                }
+
                 if (data.type === "character_updated" || data.type === "character_created") {
                     if (!data.character || typeof data.character.id !== "number") return
                     const didUpdate = applyStatusUpdate(data.character)
@@ -406,7 +659,7 @@ export default function Dashboard() {
             }
             wsRef.current = null
         }
-    }, [user, token, fetchCharacters, fetchActionLogs, applyStatusUpdate, masterTab])
+    }, [user, token, fetchCharacters, fetchActionLogs, applyStatusUpdate])
 
     if (isLoading) {
         return null
@@ -506,7 +759,7 @@ export default function Dashboard() {
                 return <p className="text-zinc-300 font-text">Não existem personagens criados</p>
             }
             return (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {characters.map((char) => {
                         const originLabel =
                             typeof char.origin === "string" && char.origin.trim().length > 0
@@ -571,7 +824,7 @@ export default function Dashboard() {
                 return <p className="text-zinc-300 font-text">Nenhum teste registrado.</p>
             }
             return (
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-3 max-h-[44rem] overflow-y-auto pr-2 scrollbar-ordo">
                     {actionLogs.map((log) => {
                         const summary = buildLogSummary(log)
                         const actionLabel = actionTypeLabels[log.action_type] ?? formatEnum(log.action_type)
@@ -609,19 +862,20 @@ export default function Dashboard() {
                                         </div>
                                     </div>
                                     <div className="flex-1 flex flex-col gap-2">
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-zinc-300 font-text">
-                                            <div>
-                                                <span className="text-zinc-400">Tipo de teste: </span>
-                                                {typeLabel}
-                                            </div>
-                                            <div>
-                                                <span className="text-zinc-400">Resultado: </span>
-                                                {summary.resultValue !== null ? summary.resultValue : "-"}
-                                            </div>
+                                        <div className="text-sm text-zinc-300 font-text">
+                                            <span className="text-zinc-400">Tipo de teste: </span>
+                                            {typeLabel}
                                         </div>
-                                        {summary.result && (
-                                            <div className="text-sm text-zinc-100">{summary.result}</div>
-                                        )}
+                                        {summary.breakdownLines.map((line, index) => (
+                                            <div key={`breakdown-${log.id}-${index}`} className="text-sm text-zinc-200">
+                                                {line}
+                                            </div>
+                                        ))}
+                                        {summary.detailLines.map((line, index) => (
+                                            <div key={`detail-${log.id}-${index}`} className="text-sm text-zinc-200">
+                                                {line}
+                                            </div>
+                                        ))}
                                         {summary.extra && (
                                             <div className="text-xs text-zinc-400">{summary.extra}</div>
                                         )}
@@ -636,38 +890,31 @@ export default function Dashboard() {
 
         return (
             <div className="w-full px-4 md:px-8 flex flex-col gap-6">
-                <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                        <h2 className="text-2xl text-blue-500 font-bigtitle">
-                            {masterTab === "history" ? "Histórico de Testes" : "Status dos Personagens"}
-                        </h2>
-                        <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 w-full">
+                    <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
+                        <div className="flex items-center justify-between gap-4">
+                            <h2 className="text-2xl text-blue-500 font-bigtitle">
+                                Status dos Personagens
+                            </h2>
+                        </div>
+                        {renderStatusGrid()}
+                    </div>
+                    <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
+                        <div className="flex items-center justify-between gap-4">
+                            <h2 className="text-2xl text-blue-500 font-bigtitle">
+                                Histórico de Testes
+                            </h2>
                             <button
                                 type="button"
-                                onClick={() => setMasterTab("status")}
-                                className={`px-4 py-2 rounded text-sm font-smalltitle transition ${
-                                    masterTab === "status"
-                                        ? "bg-blue-600 text-white"
-                                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                                }`}
+                                onClick={handleResetHistory}
+                                disabled={isResettingHistory}
+                                className="px-4 py-2 rounded text-sm font-smalltitle transition bg-red-600 text-white hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
-                                Status
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setMasterTab("history")}
-                                className={`px-4 py-2 rounded text-sm font-smalltitle transition ${
-                                    masterTab === "history"
-                                        ? "bg-blue-600 text-white"
-                                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                                }`}
-                            >
-                                Histórico
+                                {isResettingHistory ? "Limpando..." : "Resetar histórico"}
                             </button>
                         </div>
+                        {renderHistory()}
                     </div>
-
-                    {masterTab === "history" ? renderHistory() : renderStatusGrid()}
                 </div>
             </div>
         )

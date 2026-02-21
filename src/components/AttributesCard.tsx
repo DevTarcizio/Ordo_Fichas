@@ -22,7 +22,7 @@ type Props =
         values: AttributeValues
         avatarMarkSrc?: string
         fontSize?: number
-        onRollAttribute?: (attribute: keyof AttributeValues, value: number) => void
+        onRollAttribute?: (attribute: keyof AttributeValues, value: number) => void | Promise<void>
         className?: string
     }
     | {

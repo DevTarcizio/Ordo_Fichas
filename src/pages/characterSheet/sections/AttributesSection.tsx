@@ -8,7 +8,10 @@ type AttributesSectionProps = {
     avatarMarkSrc: string
     onOpenAttributesEdit: () => void
     onOpenLevelUp: () => void
-    onRollAttribute: (attribute: "agility" | "intellect" | "vitallity" | "presence" | "strength", value: number) => void
+    onRollAttribute: (
+        attribute: "agility" | "intellect" | "vitallity" | "presence" | "strength",
+        value: number
+    ) => void | Promise<void>
 }
 
 function AttributesSectionBase({
