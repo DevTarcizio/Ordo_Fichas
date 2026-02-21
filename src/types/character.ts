@@ -66,6 +66,7 @@ export type CharacterSummary = {
     id: number
     name: string
     age: number
+    avatar?: string
     character_class: string
     rank: string
     origin: string | OriginSummary | null
