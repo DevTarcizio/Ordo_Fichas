@@ -65,6 +65,7 @@ export type RitualSummary = {
 export type CharacterSummary = {
     id: number
     name: string
+    user_id?: number
     age: number
     avatar?: string
     character_class: string

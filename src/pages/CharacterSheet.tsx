@@ -1,9 +1,10 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react"
+﻿import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent, type WheelEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import { ChevronDown, Eye, EyeOff, Info, Pencil, Plus, Trash2, X } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
+import { useAuth } from "../contexts/useAuth"
 import type {
     AbilitySummary,
     CharacterDetails,
@@ -13,6 +14,7 @@ import type {
     RitualSummary,
     WeaponSummary
 } from "../types/character"
+import type { DocumentAnnotation, DocumentSummary } from "../types/document"
 import CharacterEditModal from "../components/CharacterEditModal"
 import type { EditForm } from "../components/CharacterEditModal"
 import StatusEditModal from "../components/StatusEditModal"
@@ -71,6 +73,18 @@ type PendingRitualOccultismTest = {
     ritualVariant: "padrao" | "discente" | "verdadeiro"
     peCost: number
     dt: number
+}
+
+type RealtimeDocumentMessage = {
+    type: string
+    document?: DocumentSummary
+    annotation?: DocumentAnnotation
+}
+
+type AnnotationComposerProps = {
+    disabled: boolean
+    isSending: boolean
+    onSend: (body: string) => Promise<boolean> | boolean
 }
 
 type PendingSaberPoder =
@@ -176,6 +190,59 @@ const formatSignedBonus = (value: number) => {
     if (!value) return ""
     return value > 0 ? `+${value}` : String(value)
 }
+
+const AnnotationComposer = memo(function AnnotationComposer({
+    disabled,
+    isSending,
+    onSend
+}: AnnotationComposerProps) {
+    const [draft, setDraft] = useState("")
+    const canSend = !disabled && !isSending && draft.trim().length > 0
+
+    const submit = useCallback(async () => {
+        if (!canSend) return
+        const body = draft.trim()
+        const ok = await onSend(body)
+        if (ok) {
+            setDraft("")
+        }
+    }, [canSend, draft, onSend])
+
+    const handleSubmit = useCallback((event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        void submit()
+    }, [submit])
+
+    const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault()
+            void submit()
+        }
+    }, [submit])
+
+    return (
+        <form
+            onSubmit={handleSubmit}
+            className="flex flex-col gap-2"
+        >
+            <textarea
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Escreva uma anotação..."
+                className="min-h-24 max-h-40 resize-y bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 font-text"
+                disabled={disabled || isSending}
+            />
+            <button
+                type="submit"
+                disabled={!canSend}
+                className="self-end px-3 py-2 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+                {isSending ? "Enviando..." : "Enviar"}
+            </button>
+        </form>
+    )
+})
 
 const mergeSkillTestOptions = (
     base?: SkillTestOptions,
@@ -349,6 +416,14 @@ type InventorySpaceState = {
     available?: number
 }
 
+type EquipmentEntry = {
+    id: string | number
+    name: string
+    space: number
+    category: string | undefined
+    description: string | undefined
+}
+
 const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
     if (!origin) return ""
     if (typeof origin === "string") return origin
@@ -420,6 +495,31 @@ const normalizeText = (value: string) =>
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
+
+const formatTimestamp = (value: string) => {
+    if (!value) return ""
+    try {
+        return new Date(value).toLocaleString("pt-BR")
+    } catch {
+        return value
+    }
+}
+
+const formatBytes = (value: number) => {
+    if (!Number.isFinite(value)) return ""
+    if (value < 1024) return `${value} B`
+    const kb = value / 1024
+    if (kb < 1024) return `${kb.toFixed(1)} KB`
+    const mb = kb / 1024
+    if (mb < 1024) return `${mb.toFixed(1)} MB`
+    const gb = mb / 1024
+    return `${gb.toFixed(1)} GB`
+}
+
+const getAvatarUrl = (avatar?: string | null) => {
+    if (!avatar) return null
+    return `/avatars/${avatar}/${avatar}.png`
+}
 
 const isIntellectExpertise = (name: string) =>
     expertiseAttributeMap[normalizeText(name)] === "atrib_intellect"
@@ -1070,7 +1170,6 @@ export default function CharacterSheet() {
     const [weaponPickerMode, setWeaponPickerMode] = useState<"list" | "custom" | "edit">("list")
     const [weaponForm, setWeaponForm] = useState(() => ({ ...weaponFormDefaults }))
     const [isCreatingWeapon, setIsCreatingWeapon] = useState(false)
-    const [customWeaponIds, setCustomWeaponIds] = useState<number[]>([])
     const [removingWeaponId, setRemovingWeaponId] = useState<number | null>(null)
     const [weaponToEdit, setWeaponToEdit] = useState<WeaponSummary | null>(null)
     const [expandedWeaponIds, setExpandedWeaponIds] = useState<number[]>([])
@@ -1109,6 +1208,53 @@ export default function CharacterSheet() {
     const [ritualToEdit, setRitualToEdit] = useState<RitualSummary | null>(null)
     const [ritualToRemove, setRitualToRemove] = useState<RitualSummary | null>(null)
     const [isRitualRemoveConfirmOpen, setIsRitualRemoveConfirmOpen] = useState(false)
+    const [documents, setDocuments] = useState<DocumentSummary[]>([])
+    const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
+    const [documentsError, setDocumentsError] = useState<string | null>(null)
+    const [documentAnnotations, setDocumentAnnotations] = useState<DocumentAnnotation[]>([])
+    const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false)
+    const [annotationsError, setAnnotationsError] = useState<string | null>(null)
+    const [isSendingAnnotation, setIsSendingAnnotation] = useState(false)
+    const [shareCharacters, setShareCharacters] = useState<Array<{ id: number; name: string }>>([])
+    const [sharingDocumentId, setSharingDocumentId] = useState<number | null>(null)
+    const [shareTargetsByDocument, setShareTargetsByDocument] = useState<Record<number, number | "">>({})
+    const [characterDirectory, setCharacterDirectory] = useState<
+        Record<number, { name: string; avatar?: string | null }>
+    >({})
+    const [previewDocument, setPreviewDocument] = useState<DocumentSummary | null>(null)
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+    const [isPreviewLoading, setIsPreviewLoading] = useState(false)
+    const [previewError, setPreviewError] = useState<string | null>(null)
+    const [previewZoom, setPreviewZoom] = useState(1)
+    const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 })
+    const [isPreviewPanning, setIsPreviewPanning] = useState(false)
+    const wsDocumentsRef = useRef<WebSocket | null>(null)
+    const wsDocumentsReconnectRef = useRef<number | null>(null)
+    const wsDocumentsHeartbeatRef = useRef<number | null>(null)
+    const wsDocumentsRetryRef = useRef(0)
+    const previewDocumentIdRef = useRef<number | null>(null)
+    const previewPanStartRef = useRef<{
+        pointerId: number
+        startX: number
+        startY: number
+        offsetX: number
+        offsetY: number
+    } | null>(null)
+    const previewContentRef = useRef<HTMLDivElement | null>(null)
+    const previewOffsetRef = useRef({ x: 0, y: 0 })
+    const previewPendingOffsetRef = useRef({ x: 0, y: 0 })
+    const previewFrameRef = useRef<number | null>(null)
+    const previewZoomRef = useRef(1)
+    const previewPointersRef = useRef(new Map<number, { x: number; y: number }>())
+    const previewPinchRef = useRef<{
+        active: boolean
+        startDistance: number
+        startZoom: number
+        startOffset: { x: number; y: number }
+        center: { x: number; y: number }
+    } | null>(null)
+    const annotationsListRef = useRef<HTMLDivElement | null>(null)
+    const prevAnnotationsCountRef = useRef(0)
     const [isExpertiseInfoOpen, setIsExpertiseInfoOpen] = useState(false)
     const [expandedExpertiseInfo, setExpandedExpertiseInfo] = useState<string | null>(null)
     const [removingAbilityId, setRemovingAbilityId] = useState<number | null>(null)
@@ -1119,6 +1265,7 @@ export default function CharacterSheet() {
         old: CharacterDetails
         new: CharacterDetails
     } | null>(null)
+    const { user } = useAuth()
     const token = localStorage.getItem("token")
 
     const fetchInventorySpace = useCallback(async () => {
@@ -1134,6 +1281,456 @@ export default function CharacterSheet() {
             console.error("Erro ao buscar espaço do inventário:", err)
         }
     }, [id])
+
+    const fetchDocuments = useCallback(async () => {
+        if (!id) return
+        setIsLoadingDocuments(true)
+        setDocumentsError(null)
+        try {
+            const response = await api.get("/documents/", {
+                params: user?.role === "master" ? { character_id: id } : undefined
+            })
+            const list = Array.isArray(response.data?.documents) ? response.data.documents : []
+            setDocuments(list as DocumentSummary[])
+        } catch (err) {
+            const status = (err as { response?: { status?: number } })?.response?.status
+            if (status === 404) {
+                setDocuments([])
+                setDocumentsError(null)
+            } else {
+                console.error("Erro ao buscar documentos:", err)
+                setDocumentsError("Erro ao buscar documentos.")
+            }
+        } finally {
+            setIsLoadingDocuments(false)
+        }
+    }, [id, user?.role])
+
+    const fetchAnnotations = useCallback(async (documentId: number) => {
+        setIsLoadingAnnotations(true)
+        setAnnotationsError(null)
+        try {
+            const response = await api.get(`/documents/${documentId}/annotations`)
+            const list = Array.isArray(response.data?.annotations) ? response.data.annotations : []
+            setDocumentAnnotations(list as DocumentAnnotation[])
+        } catch (err) {
+            const status = (err as { response?: { status?: number } })?.response?.status
+            if (status === 404) {
+                setDocumentAnnotations([])
+                setAnnotationsError("Documento ainda não liberado.")
+            } else {
+                console.error("Erro ao buscar anotações:", err)
+                setAnnotationsError("Erro ao buscar anotações.")
+            }
+        } finally {
+            setIsLoadingAnnotations(false)
+        }
+    }, [])
+
+    const fetchCharacterDirectory = useCallback(async () => {
+        const endpoint = user?.role === "player" ? "/characters/list/all" : "/characters/list"
+        try {
+            const response = await api.get(endpoint)
+            const list = Array.isArray(response.data?.characters) ? response.data.characters : []
+            const directory: Record<number, { name: string; avatar?: string | null }> = {}
+            const options: Array<{ id: number; name: string }> = []
+            list.forEach((entry: Record<string, unknown>) => {
+                const userId = Number(entry.user_id)
+                if (!Number.isFinite(userId)) return
+                if (!directory[userId]) {
+                    directory[userId] = {
+                        name: typeof entry.name === "string" ? entry.name : `Usuário #${userId}`,
+                        avatar: typeof entry.avatar === "string" ? entry.avatar : null
+                    }
+                }
+                const charId = Number(entry.id)
+                if (Number.isFinite(charId)) {
+                    options.push({
+                        id: charId,
+                        name: typeof entry.name === "string" ? entry.name : `Personagem #${charId}`
+                    })
+                }
+            })
+            setCharacterDirectory(directory)
+            setShareCharacters(options)
+        } catch (err) {
+            console.error("Erro ao buscar personagens para anotações:", err)
+        }
+    }, [user?.role])
+
+    const handleSendAnnotation = useCallback(async (body: string) => {
+        if (!previewDocument) return false
+        const trimmed = body.trim()
+        if (!trimmed) return false
+        try {
+            setIsSendingAnnotation(true)
+            const response = await api.post(`/documents/${previewDocument.id}/annotations`, {
+                body: trimmed
+            })
+            const created = response.data as DocumentAnnotation
+            setDocumentAnnotations((prev) => [...prev, created])
+            return true
+        } catch (err) {
+            console.error("Erro ao enviar anotação:", err)
+            setAnnotationsError("Erro ao enviar anotação.")
+            return false
+        } finally {
+            setIsSendingAnnotation(false)
+        }
+    }, [previewDocument])
+
+    const handleShareDocumentWithAll = useCallback(async (docId: number) => {
+        if (user?.role !== "player") return
+        try {
+            setSharingDocumentId(docId)
+            await api.post(`/documents/${docId}/share`, {
+                share_with_all: true
+            })
+        } catch (err) {
+            console.error("Erro ao compartilhar documento:", err)
+            alert("Erro ao compartilhar documento.")
+        } finally {
+            setSharingDocumentId(null)
+        }
+    }, [user?.role])
+
+    const handleShareDocumentWithCharacter = useCallback(async (docId: number, characterId: number) => {
+        if (user?.role !== "player") return
+        try {
+            setSharingDocumentId(docId)
+            await api.post(`/documents/${docId}/share`, {
+                share_with_all: false,
+                character_id: characterId
+            })
+        } catch (err) {
+            console.error("Erro ao compartilhar documento:", err)
+            alert("Erro ao compartilhar documento.")
+        } finally {
+            setSharingDocumentId(null)
+        }
+    }, [user?.role])
+
+    const fetchDocumentBlob = useCallback(async (doc: DocumentSummary) => {
+        return api.get(`/documents/${doc.id}/file`, { responseType: "blob" })
+    }, [])
+
+    const handleDownloadDocument = useCallback(async (doc: DocumentSummary) => {
+        try {
+            const response = await fetchDocumentBlob(doc)
+            const blob = new Blob([response.data], { type: doc.content_type })
+            const url = window.URL.createObjectURL(blob)
+            const link = document.createElement("a")
+            link.href = url
+            link.download = doc.original_name
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            window.URL.revokeObjectURL(url)
+        } catch (err) {
+            console.error("Erro ao baixar documento:", err)
+            alert("Erro ao baixar documento.")
+        }
+    }, [fetchDocumentBlob])
+
+    const clearPreview = useCallback(() => {
+        if (previewUrl) {
+            window.URL.revokeObjectURL(previewUrl)
+        }
+        if (previewFrameRef.current) {
+            cancelAnimationFrame(previewFrameRef.current)
+            previewFrameRef.current = null
+        }
+        setPreviewUrl(null)
+        setPreviewDocument(null)
+        setPreviewError(null)
+        setIsPreviewLoading(false)
+        setPreviewZoom(1)
+        setPreviewOffset({ x: 0, y: 0 })
+        previewOffsetRef.current = { x: 0, y: 0 }
+        previewPendingOffsetRef.current = { x: 0, y: 0 }
+        previewZoomRef.current = 1
+        previewPointersRef.current.clear()
+        previewPinchRef.current = null
+        setDocumentAnnotations([])
+        setAnnotationsError(null)
+        setShareCharacters([])
+        setShareTargetsByDocument({})
+        setSharingDocumentId(null)
+        setCharacterDirectory({})
+        setIsPreviewPanning(false)
+        previewPanStartRef.current = null
+    }, [previewUrl])
+
+    const handlePreviewDocument = useCallback(async (doc: DocumentSummary) => {
+        if (previewUrl) {
+            window.URL.revokeObjectURL(previewUrl)
+        }
+        setPreviewUrl(null)
+        setPreviewDocument(doc)
+        setPreviewError(null)
+        setIsPreviewLoading(true)
+        setPreviewZoom(1)
+        setPreviewOffset({ x: 0, y: 0 })
+        previewOffsetRef.current = { x: 0, y: 0 }
+        previewPendingOffsetRef.current = { x: 0, y: 0 }
+        previewZoomRef.current = 1
+        previewPointersRef.current.clear()
+        previewPinchRef.current = null
+        setDocumentAnnotations([])
+        setAnnotationsError(null)
+        setShareCharacters([])
+        setShareTargetsByDocument({})
+        setSharingDocumentId(null)
+        setCharacterDirectory({})
+        setIsPreviewPanning(false)
+        previewPanStartRef.current = null
+        try {
+            const response = await fetchDocumentBlob(doc)
+            const blob = new Blob([response.data], { type: doc.content_type })
+            const url = window.URL.createObjectURL(blob)
+            setPreviewUrl(url)
+            void fetchAnnotations(doc.id)
+            void fetchCharacterDirectory()
+        } catch (err) {
+            console.error("Erro ao visualizar documento:", err)
+            setPreviewError("Erro ao visualizar documento.")
+        } finally {
+            setIsPreviewLoading(false)
+        }
+    }, [fetchAnnotations, fetchCharacterDirectory, fetchDocumentBlob, previewUrl])
+
+    useEffect(() => {
+        return () => {
+            if (previewFrameRef.current) {
+                cancelAnimationFrame(previewFrameRef.current)
+                previewFrameRef.current = null
+            }
+            if (previewUrl) {
+                window.URL.revokeObjectURL(previewUrl)
+            }
+        }
+    }, [previewUrl])
+
+    useEffect(() => {
+        previewDocumentIdRef.current = previewDocument?.id ?? null
+    }, [previewDocument])
+
+    useEffect(() => {
+        prevAnnotationsCountRef.current = 0
+    }, [previewDocument?.id])
+
+    useEffect(() => {
+        if (!previewDocument) return
+        const nextCount = documentAnnotations.length
+        const prevCount = prevAnnotationsCountRef.current
+        prevAnnotationsCountRef.current = nextCount
+        if (nextCount <= prevCount) return
+        requestAnimationFrame(() => {
+            const container = annotationsListRef.current
+            if (!container) return
+            container.scrollTop = container.scrollHeight
+        })
+    }, [documentAnnotations.length, previewDocument])
+
+    const applyPreviewTransform = useCallback(() => {
+        const node = previewContentRef.current
+        if (!node) return
+        const offset = previewOffsetRef.current
+        const zoom = previewZoomRef.current
+        node.style.transform = `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${zoom})`
+    }, [])
+
+    const schedulePreviewOffset = useCallback(
+        (nextOffset: { x: number; y: number }) => {
+            previewPendingOffsetRef.current = nextOffset
+            if (previewFrameRef.current === null) {
+                previewFrameRef.current = requestAnimationFrame(() => {
+                    previewFrameRef.current = null
+                    const pending = previewPendingOffsetRef.current
+                    previewOffsetRef.current = pending
+                    applyPreviewTransform()
+                })
+            }
+        },
+        [applyPreviewTransform]
+    )
+
+    const clampPreviewZoom = useCallback((value: number) => {
+        if (value < 0.5) return 0.5
+        if (value > 3) return 3
+        return value
+    }, [])
+
+    const updatePreviewZoom = useCallback(
+        (nextZoom: number, center?: { x: number; y: number }) => {
+            const clamped = clampPreviewZoom(nextZoom)
+            if (clamped === previewZoomRef.current) return
+            if (center) {
+                const rect = previewContentRef.current?.parentElement?.getBoundingClientRect()
+                if (rect) {
+                    const cx = center.x - rect.left - rect.width / 2
+                    const cy = center.y - rect.top - rect.height / 2
+                    const scale = clamped / previewZoomRef.current
+                    previewOffsetRef.current = {
+                        x: previewOffsetRef.current.x - cx * (scale - 1),
+                        y: previewOffsetRef.current.y - cy * (scale - 1)
+                    }
+                    previewPendingOffsetRef.current = previewOffsetRef.current
+                }
+            }
+            previewZoomRef.current = clamped
+            setPreviewZoom(clamped)
+            applyPreviewTransform()
+        },
+        [applyPreviewTransform, clampPreviewZoom]
+    )
+
+    useEffect(() => {
+        if (!previewUrl) return
+        applyPreviewTransform()
+    }, [applyPreviewTransform, previewUrl])
+
+    const handlePreviewZoomIn = useCallback(() => {
+        updatePreviewZoom(previewZoomRef.current + 0.25)
+    }, [updatePreviewZoom])
+
+    const handlePreviewZoomOut = useCallback(() => {
+        updatePreviewZoom(previewZoomRef.current - 0.25)
+    }, [updatePreviewZoom])
+
+    const handlePreviewReset = useCallback(() => {
+        setPreviewZoom(1)
+        setPreviewOffset({ x: 0, y: 0 })
+        previewOffsetRef.current = { x: 0, y: 0 }
+        previewPendingOffsetRef.current = { x: 0, y: 0 }
+        previewZoomRef.current = 1
+        applyPreviewTransform()
+    }, [applyPreviewTransform])
+
+    const handlePreviewPointerDown = useCallback(
+        (event: PointerEvent<HTMLDivElement>) => {
+            if (!previewUrl || isPreviewLoading || previewError) return
+            if (event.pointerType === "mouse" && event.button !== 0) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            previewPointersRef.current.set(event.pointerId, {
+                x: event.clientX,
+                y: event.clientY
+            })
+            if (previewPointersRef.current.size === 2) {
+                const [p1, p2] = Array.from(previewPointersRef.current.values())
+                const dx = p2.x - p1.x
+                const dy = p2.y - p1.y
+                previewPinchRef.current = {
+                    active: true,
+                    startDistance: Math.hypot(dx, dy),
+                    startZoom: previewZoomRef.current,
+                    startOffset: { ...previewOffsetRef.current },
+                    center: {
+                        x: (p1.x + p2.x) / 2,
+                        y: (p1.y + p2.y) / 2
+                    }
+                }
+                previewPanStartRef.current = null
+                setIsPreviewPanning(false)
+                return
+            }
+            if (previewPointersRef.current.size === 1) {
+                previewPanStartRef.current = {
+                    pointerId: event.pointerId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    offsetX: previewOffsetRef.current.x,
+                    offsetY: previewOffsetRef.current.y
+                }
+                setIsPreviewPanning(true)
+            }
+        },
+        [previewError, previewUrl, isPreviewLoading]
+    )
+
+    const handlePreviewPointerMove = useCallback(
+        (event: PointerEvent<HTMLDivElement>) => {
+            if (!previewPointersRef.current.has(event.pointerId)) return
+            previewPointersRef.current.set(event.pointerId, {
+                x: event.clientX,
+                y: event.clientY
+            })
+            if (previewPointersRef.current.size === 2) {
+                const [p1, p2] = Array.from(previewPointersRef.current.values())
+                const dx = p2.x - p1.x
+                const dy = p2.y - p1.y
+                const distance = Math.hypot(dx, dy)
+                if (!previewPinchRef.current) {
+                    previewPinchRef.current = {
+                        active: true,
+                        startDistance: distance,
+                        startZoom: previewZoomRef.current,
+                        startOffset: { ...previewOffsetRef.current },
+                        center: {
+                            x: (p1.x + p2.x) / 2,
+                            y: (p1.y + p2.y) / 2
+                        }
+                    }
+                }
+                const pinch = previewPinchRef.current
+                if (pinch?.startDistance) {
+                    const scale = distance / pinch.startDistance
+                    const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
+                    updatePreviewZoom(pinch.startZoom * scale, center)
+                    const deltaX = center.x - pinch.center.x
+                    const deltaY = center.y - pinch.center.y
+                    const nextOffset = {
+                        x: previewOffsetRef.current.x + deltaX,
+                        y: previewOffsetRef.current.y + deltaY
+                    }
+                    schedulePreviewOffset(nextOffset)
+                    pinch.center = center
+                }
+                return
+            }
+            const start = previewPanStartRef.current
+            if (!start || start.pointerId !== event.pointerId) return
+            const dx = event.clientX - start.startX
+            const dy = event.clientY - start.startY
+            const nextOffset = {
+                x: start.offsetX + dx,
+                y: start.offsetY + dy
+            }
+            schedulePreviewOffset(nextOffset)
+        },
+        [schedulePreviewOffset, updatePreviewZoom]
+    )
+
+    const handlePreviewPointerUp = useCallback((event: PointerEvent<HTMLDivElement>) => {
+        if (previewPointersRef.current.has(event.pointerId)) {
+            previewPointersRef.current.delete(event.pointerId)
+        }
+        if (previewPinchRef.current && previewPointersRef.current.size < 2) {
+            previewPinchRef.current = null
+            setPreviewOffset(previewOffsetRef.current)
+            return
+        }
+        const start = previewPanStartRef.current
+        if (!start || start.pointerId !== event.pointerId) return
+        event.currentTarget.releasePointerCapture(event.pointerId)
+        previewPanStartRef.current = null
+        setIsPreviewPanning(false)
+        setPreviewOffset(previewOffsetRef.current)
+    }, [])
+
+    const handlePreviewWheel = useCallback(
+        (event: WheelEvent<HTMLDivElement>) => {
+            if (!previewUrl || isPreviewLoading || previewError) return
+            event.preventDefault()
+            const delta = event.deltaY
+            const zoomFactor = Math.exp(-delta * 0.0015)
+            updatePreviewZoom(previewZoomRef.current * zoomFactor, {
+                x: event.clientX,
+                y: event.clientY
+            })
+        },
+        [previewError, previewUrl, isPreviewLoading, updatePreviewZoom]
+    )
 
     useEffect(() => {
         const fetchCharacter = async () => {
@@ -1227,6 +1824,145 @@ export default function CharacterSheet() {
     useEffect(() => {
         void fetchInventorySpace()
     }, [fetchInventorySpace])
+
+    useEffect(() => {
+        void fetchDocuments()
+    }, [fetchDocuments])
+
+    useEffect(() => {
+        if (user?.role !== "player") return
+        if (shareCharacters.length > 0) return
+        void fetchCharacterDirectory()
+    }, [fetchCharacterDirectory, shareCharacters.length, user?.role])
+
+    useEffect(() => {
+        if (!user) return
+        const baseUrl = api.defaults.baseURL ?? ""
+        const wsBase = baseUrl.replace(/\/$/, "").replace(/^http/i, "ws")
+        const tokenValue = token ?? localStorage.getItem("token")
+        let shouldReconnect = true
+
+        const clearRealtimeTimers = () => {
+            if (wsDocumentsReconnectRef.current) {
+                clearTimeout(wsDocumentsReconnectRef.current)
+                wsDocumentsReconnectRef.current = null
+            }
+            if (wsDocumentsHeartbeatRef.current) {
+                clearInterval(wsDocumentsHeartbeatRef.current)
+                wsDocumentsHeartbeatRef.current = null
+            }
+        }
+
+        const sortDocuments = (list: DocumentSummary[]) =>
+            list.slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+        const sortAnnotations = (list: DocumentAnnotation[]) =>
+            list.slice().sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+        const applyDocumentUpdate = (document: DocumentSummary, eventType: string) => {
+            setDocuments((prev) => {
+                const filtered = prev.filter((entry) => entry.id !== document.id)
+                if (user.role === "master") {
+                    if (!id) return filtered
+                    if (document.character_id !== Number(id)) return filtered
+                    return sortDocuments([document, ...filtered])
+                }
+                if (eventType === "document_locked") {
+                    return filtered
+                }
+                return sortDocuments([document, ...filtered])
+            })
+            if (previewDocumentIdRef.current === document.id) {
+                setPreviewDocument(document)
+            }
+        }
+
+        const applyAnnotationUpdate = (annotation: DocumentAnnotation, eventType: string) => {
+            const previewId = previewDocumentIdRef.current
+            if (!previewId || annotation.document_id !== previewId) return
+            setDocumentAnnotations((prev) => {
+                if (eventType === "document_annotation_deleted") {
+                    return prev.filter((entry) => entry.id !== annotation.id)
+                }
+                if (eventType === "document_annotation_updated") {
+                    return sortAnnotations(
+                        prev.map((entry) => (entry.id === annotation.id ? annotation : entry))
+                    )
+                }
+                if (eventType === "document_annotation_created") {
+                    if (prev.some((entry) => entry.id === annotation.id)) return prev
+                    return sortAnnotations([...prev, annotation])
+                }
+                return prev
+            })
+        }
+
+        const connect = () => {
+            if (!shouldReconnect || !tokenValue || !wsBase) return
+            clearRealtimeTimers()
+            if (wsDocumentsRef.current && wsDocumentsRef.current.readyState === WebSocket.OPEN) {
+                wsDocumentsRef.current.close(1000, "reconnect")
+            }
+            const wsUrl = `${wsBase}/realtime/ws?token=${encodeURIComponent(tokenValue)}`
+            const websocket = new WebSocket(wsUrl)
+            wsDocumentsRef.current = websocket
+
+            websocket.onopen = () => {
+                wsDocumentsRetryRef.current = 0
+                clearRealtimeTimers()
+                wsDocumentsHeartbeatRef.current = window.setInterval(() => {
+                    if (websocket.readyState === WebSocket.OPEN) {
+                        websocket.send("ping")
+                    }
+                }, 25_000)
+            }
+
+            websocket.onmessage = (event) => {
+                let data: RealtimeDocumentMessage | null = null
+                try {
+                    data = JSON.parse(event.data) as RealtimeDocumentMessage
+                } catch {
+                    return
+                }
+                if (!data || typeof data.type !== "string") return
+
+                if (data.type.startsWith("document_annotation_") && data.annotation) {
+                    applyAnnotationUpdate(data.annotation, data.type)
+                    return
+                }
+
+                if (data.type.startsWith("document_") && data.document) {
+                    applyDocumentUpdate(data.document, data.type)
+                }
+            }
+
+            websocket.onerror = () => {
+                websocket.close()
+            }
+
+            websocket.onclose = () => {
+                clearRealtimeTimers()
+                if (!shouldReconnect) return
+                wsDocumentsRetryRef.current += 1
+                const delay = Math.min(1000 * 2 ** (wsDocumentsRetryRef.current - 1), 30_000)
+                wsDocumentsReconnectRef.current = window.setTimeout(connect, delay)
+            }
+        }
+
+        if (tokenValue && wsBase) {
+            connect()
+        }
+
+        return () => {
+            shouldReconnect = false
+            clearRealtimeTimers()
+            wsDocumentsRetryRef.current = 0
+            if (wsDocumentsRef.current && wsDocumentsRef.current.readyState !== WebSocket.CLOSED) {
+                wsDocumentsRef.current.close(1000, "cleanup")
+            }
+            wsDocumentsRef.current = null
+        }
+    }, [id, token, user])
 
     useEffect(() => {
         if (!character) return
@@ -1398,7 +2134,7 @@ export default function CharacterSheet() {
         } catch {
             setPeritoSkills([])
         }
-    }, [character?.id, expertise])
+    }, [character, expertise])
 
     useEffect(() => {
         if (!character) return
@@ -1420,7 +2156,7 @@ export default function CharacterSheet() {
             (item) => normalizeText(item.value) === normalized
         )
         setElementSpecialistChoice(option?.value ?? null)
-    }, [character?.id, character?.abilities])
+    }, [character, character?.abilities])
 
     useEffect(() => {
         if (!character) return
@@ -1442,7 +2178,7 @@ export default function CharacterSheet() {
             (item) => normalizeText(item.value) === normalized
         )
         setElementMasterChoice(option?.value ?? null)
-    }, [character?.id, character?.abilities])
+    }, [character, character?.abilities])
 
     useEffect(() => {
         if (!character) return
@@ -1462,7 +2198,70 @@ export default function CharacterSheet() {
         }
         const exists = (character.rituals ?? []).some((ritual) => ritual.id === parsed)
         setRitualPrediletoId(exists ? parsed : null)
-    }, [character?.id, character?.abilities, character?.rituals])
+    }, [character, character?.abilities, character?.rituals])
+
+    async function updateStatus(field: StatusField, newValue: number) {
+        try {
+            await api.patch(
+                `/characters/${character!.id}/`,
+                { [field]: newValue },
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+        } catch (err) {
+            console.log(err)
+            alert("Erro ao atualizar dados do servidor")
+        }
+    }
+
+    const updateStatusBatch = useCallback(async (payload: Record<string, number>) => {
+        if (!character) return
+        try {
+            await api.patch(
+                `/characters/${character.id}/`,
+                payload,
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            )
+        } catch (err) {
+            console.log(err)
+            alert("Erro ao atualizar dados do servidor")
+        }
+    }, [character, token])
+
+    const applySanityChange = useCallback((pointsDelta: number, permanentLoss: number) => {
+        if (!character) return
+        setCharacter((prev) => {
+            if (!prev) return prev
+            const nextMax = clamp(
+                prev.sanity_max - permanentLoss,
+                0,
+                prev.sanity_max
+            )
+            const nextPoints = clamp(
+                prev.sanity_points + pointsDelta,
+                0,
+                nextMax
+            )
+            const updates: Record<string, number> = {}
+            if (permanentLoss > 0) {
+                updates.sanity_max = nextMax
+            }
+            if (pointsDelta !== 0 || permanentLoss > 0) {
+                updates.sanity_points = nextPoints
+            }
+            if (Object.keys(updates).length > 0) {
+                void updateStatusBatch(updates)
+            }
+            return {
+                ...prev,
+                sanity_max: nextMax,
+                sanity_points: nextPoints
+            }
+        })
+    }, [character, updateStatusBatch])
 
     useEffect(() => {
         if (!pendingRitualOccultismTest || !rollResult) return
@@ -1493,70 +2292,7 @@ export default function CharacterSheet() {
             }
         }
         setPendingRitualOccultismTest(null)
-    }, [pendingRitualOccultismTest, rollResult])
-
-
-    async function updateStatus(field: StatusField, newValue: number) {
-        try {
-            await api.patch(
-                `/characters/${character!.id}/`,
-                { [field]: newValue },
-                {
-                    headers: { Authorization: `Bearer ${token}` }
-                }
-            )
-        } catch (err) {
-            console.log(err)
-            alert("Erro ao atualizar dados do servidor")
-        }
-    }
-
-    async function updateStatusBatch(payload: Record<string, number>) {
-        try {
-            await api.patch(
-                `/characters/${character!.id}/`,
-                payload,
-                {
-                    headers: { Authorization: `Bearer ${token}` }
-                }
-            )
-        } catch (err) {
-            console.log(err)
-            alert("Erro ao atualizar dados do servidor")
-        }
-    }
-
-    const applySanityChange = (pointsDelta: number, permanentLoss: number) => {
-        if (!character) return
-        setCharacter((prev) => {
-            if (!prev) return prev
-            const nextMax = clamp(
-                prev.sanity_max - permanentLoss,
-                0,
-                prev.sanity_max
-            )
-            const nextPoints = clamp(
-                prev.sanity_points + pointsDelta,
-                0,
-                nextMax
-            )
-            const updates: Record<string, number> = {}
-            if (permanentLoss > 0) {
-                updates.sanity_max = nextMax
-            }
-            if (pointsDelta !== 0 || permanentLoss > 0) {
-                updates.sanity_points = nextPoints
-            }
-            if (Object.keys(updates).length > 0) {
-                updateStatusBatch(updates)
-            }
-            return {
-                ...prev,
-                sanity_max: nextMax,
-                sanity_points: nextPoints
-            }
-        })
-    }
+    }, [pendingRitualOccultismTest, rollResult, applySanityChange])
 
     const handleStatusChange = (field: StatusField, maxField: StatusMaxField, delta: number) => {
         setCharacter(prev => {
@@ -2115,7 +2851,7 @@ export default function CharacterSheet() {
                 ? data.applied_abilities.filter((name: unknown): name is string => typeof name === "string")
                 : []
             const appliedSaberPoder = appliedAbilities.some(
-                (name) => normalizeText(name) === "saber e poder"
+                (name: string) => normalizeText(name) === "saber e poder"
             )
             const bonusValue = Number(data.bonus ?? 0)
 
@@ -2605,10 +3341,6 @@ export default function CharacterSheet() {
             setWeaponOptions(prev =>
                 [...prev, createdWeapon].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
             )
-            setCustomWeaponIds(prev =>
-                prev.includes(createdWeapon.id) ? prev : [...prev, createdWeapon.id]
-            )
-
             const response = await api.post(
                 `/characters/${character.id}/weapons/${createdWeapon.id}`
             )
@@ -3391,13 +4123,7 @@ export default function CharacterSheet() {
                 description
             }
         })
-        .filter((entry): entry is {
-            id: string | number
-            name: string
-            space: number
-            category?: string
-            description?: string
-        } => entry !== null)
+        .filter((entry): entry is EquipmentEntry => entry !== null)
     const defenseItemBonus = equipmentEntries.reduce(
         (sum, item) => sum + getDefenseBonusFromItem(item.name, item.category),
         0
@@ -3697,12 +4423,6 @@ export default function CharacterSheet() {
         return effectType === "firearm_damage_agility" || normalizeText(ability.name) === "tiro certeiro"
     })
     const hasTiroCerteiro = Boolean(tiroCerteiroAbility)
-    const tiroCerteiroBonusValue = hasTiroCerteiro ? Number(character.atrib_agility) || 0 : 0
-    const passiveBonusNotes = [
-        tiroCerteiroBonusValue
-            ? { label: "Tiro Certeiro", detail: `+${tiroCerteiroBonusValue} no dano (armas de disparo)` }
-            : null
-    ].filter((item): item is { label: string; detail: string } => item !== null)
     const activeAbilities = abilities.filter(
         (ability) =>
             Boolean(ability.is_active) || normalizeText(ability.name) === "golpe demolidor"
@@ -5199,6 +5919,127 @@ export default function CharacterSheet() {
 
     const ritualCards = rituals.map(renderRitualItem)
 
+    const renderDocuments = () => {
+        if (isLoadingDocuments) {
+            return <div className="text-zinc-300 font-text">Carregando documentos...</div>
+        }
+        if (documentsError) {
+            return <div className="text-red-400 font-text">{documentsError}</div>
+        }
+        if (documents.length === 0) {
+            return <div className="text-zinc-300 font-text">Nenhum documento encontrado.</div>
+        }
+        return (
+            <div className="flex flex-col gap-3 max-h-96 overflow-y-auto pr-2 scrollbar-ordo">
+                {documents.map((doc) => {
+                    const isPreviewable =
+                        doc.content_type === "application/pdf"
+                        || doc.content_type.startsWith("image/")
+                    const characterLabel = character && doc.character_id === character.id
+                        ? character.name
+                        : `Personagem #${doc.character_id}`
+                    const sharedByName = shareCharacters.find((char) => char.id === doc.character_id)?.name
+                        ?? characterLabel
+                    const shareTarget = shareTargetsByDocument[doc.id] ?? ""
+                    return (
+                    <div
+                        key={`character-doc-${doc.id}`}
+                        className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-3 flex flex-col gap-2"
+                    >
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="text-zinc-100 font-text truncate">{doc.original_name}</div>
+                            <span
+                                className={`text-xs font-smalltitle ${
+                                    doc.is_released ? "text-emerald-400" : "text-amber-400"
+                                }`}
+                            >
+                                {doc.is_released ? "Liberado" : "Bloqueado"}
+                            </span>
+                        </div>
+                        <div className="text-xs text-zinc-400">Local: {doc.found_location}</div>
+                        <div className="text-xs text-zinc-400">Personagem: {characterLabel}</div>
+                        {user?.role === "player" && character && doc.character_id !== character.id && (
+                            <div className="text-xs text-emerald-300">
+                                Compartilhado por {sharedByName}
+                            </div>
+                        )}
+                        <div className="text-xs text-zinc-500">
+                            {formatTimestamp(doc.created_at)} · {formatBytes(doc.size_bytes)}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {isPreviewable && (
+                                <button
+                                    type="button"
+                                    onClick={() => handlePreviewDocument(doc)}
+                                    className="px-3 py-1 rounded text-xs font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition"
+                                >
+                                    Visualizar
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => handleDownloadDocument(doc)}
+                                className="px-3 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition"
+                            >
+                                Baixar arquivo
+                            </button>
+                        </div>
+                        {user?.role === "player" && doc.is_released && character && doc.character_id === character.id && (
+                            <div className="flex flex-col gap-2 bg-zinc-800/80 border border-zinc-700 rounded p-2">
+                                <div className="text-xs text-zinc-400">Compartilhar documento</div>
+                                <div className="flex flex-wrap gap-2 items-center">
+                                    <select
+                                        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 font-text"
+                                        value={shareTarget}
+                                        onChange={(event) => {
+                                            const value = event.target.value
+                                            setShareTargetsByDocument((prev) => ({
+                                                ...prev,
+                                                [doc.id]: value ? Number(value) : ""
+                                            }))
+                                        }}
+                                        disabled={sharingDocumentId === doc.id || shareCharacters.length === 0}
+                                    >
+                                        <option value="">
+                                            {shareCharacters.length === 0
+                                                ? "Sem personagens disponíveis"
+                                                : "Escolha um personagem"}
+                                        </option>
+                                        {shareCharacters.map((char) => (
+                                            <option key={`share-doc-${doc.id}-${char.id}`} value={char.id}>
+                                                {char.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            if (!shareTarget) return
+                                            void handleShareDocumentWithCharacter(doc.id, Number(shareTarget))
+                                        }}
+                                        disabled={sharingDocumentId === doc.id || !shareTarget}
+                                        className="px-2 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        Compartilhar com
+                                    </button>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => void handleShareDocumentWithAll(doc.id)}
+                                    disabled={sharingDocumentId === doc.id}
+                                    className="px-2 py-1 rounded text-xs font-smalltitle bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                    Compartilhar com todos
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    )
+                })}
+            </div>
+        )
+    }
+
     return (
         <MainLayout>
             <div className="min-h-screen text-white px-4 md:px-6 py-6">
@@ -5483,6 +6324,14 @@ export default function CharacterSheet() {
                             nexTotal={character.nex_total}
                             onOpenRitualPicker={() => openRitualPicker("manual")}
                         />
+
+                        {/* Card Documentos */}
+                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4 md:col-span-2">
+                            <div className="flex items-center justify-between gap-3">
+                                <h1 className="text-blue-400 font-smalltitle text-2xl">Documentos</h1>
+                            </div>
+                            {renderDocuments()}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -5511,7 +6360,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     <div className="text-lg text-white">{originLabel}</div>
                     <div className="flex flex-col gap-1">
                         <span className="text-zinc-400 text-sm">Descrição</span>
@@ -5559,7 +6408,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     <div className="text-lg text-white">{trailLabel}</div>
                     <div className="flex flex-col gap-1">
                         <span className="text-zinc-400 text-sm">Descrição</span>
@@ -5633,7 +6482,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-3 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-3 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     <div className="text-zinc-200 text-sm">
                         Proficiências representam o que o personagem consegue usar e/ou manusear
                         (por exemplo, armas, equipamentos, ferramentas).
@@ -5681,7 +6530,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-3 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-3 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     {expertiseInfoList.map((name) => {
                         const label = expertiseLabelMap[name] ?? formatEnum(name)
                         const attributeKey = expertiseAttributeMap[name]
@@ -5749,7 +6598,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     <div className="flex flex-col gap-1">
                         <div className="text-lg text-white">
                             {selectedAbility?.name ?? "Habilidade"}
@@ -5828,7 +6677,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     <div className="flex flex-col gap-1">
                         <div className="text-lg text-white">
                             {specialAttackAbility?.name ?? "Ataque Especial"}
@@ -6039,7 +6888,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     <div className="text-zinc-200">
                         Selecione um ritual conhecido para reduzir em 1 PE o custo de conjurá-lo.
                     </div>
@@ -6106,7 +6955,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     <input
                         type="text"
                         value={abilitySearch}
@@ -6195,7 +7044,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     {weaponPickerMode !== "edit" && (
                         <div className="flex flex-wrap gap-2">
                             <button
@@ -6529,7 +7378,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     {itemPickerMode !== "edit" && (
                         <div className="flex flex-wrap gap-2">
                             <button
@@ -6777,7 +7626,7 @@ export default function CharacterSheet() {
                         <X />
                     </button>
                 </div>
-                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto max-h-[calc(90vh-3.5rem)]">
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
                     {ritualPickerSource === "ritual_caster" && hasRitualCaster && (
                         <div className="rounded border border-amber-500/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-100">
                             Escolhido Pelo Outro Lado: pode escolher {ritualCasterExtraCount} rituais bônus.
@@ -7443,6 +8292,207 @@ export default function CharacterSheet() {
                 </div>
             </Modal>
             <Modal
+                isOpen={Boolean(previewDocument)}
+                onClose={clearPreview}
+                className="w-[min(100%-1.5rem,72rem)] max-h-[92vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">
+                        {previewDocument?.original_name ?? "Documento"}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={handlePreviewZoomOut}
+                            className="px-2 py-1 rounded text-xs font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition"
+                        >
+                            -
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handlePreviewReset}
+                            className="px-2 py-1 rounded text-xs font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition"
+                        >
+                            {Math.round(previewZoom * 100)}%
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handlePreviewZoomIn}
+                            className="px-2 py-1 rounded text-xs font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition"
+                        >
+                            +
+                        </button>
+                        <button
+                            type="button"
+                            onClick={clearPreview}
+                            className="text-zinc-400 hover:text-white transition-colors ml-1"
+                            aria-label="Fechar"
+                        >
+                            <X />
+                        </button>
+                    </div>
+                </div>
+                <div className="px-4 py-4 max-h-[calc(92vh-3.5rem)] overflow-y-auto scrollbar-ordo">
+                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4">
+                        <div className="flex flex-col gap-3">
+                            {isPreviewLoading && (
+                                <div className="text-zinc-300 font-text">Carregando visualização...</div>
+                            )}
+                            {previewError && (
+                                <div className="text-red-400 font-text">{previewError}</div>
+                            )}
+                            {!isPreviewLoading && !previewError && previewDocument && previewUrl && (
+                                previewDocument.content_type === "application/pdf" ? (
+                                    <div
+                                        className="relative w-full h-[72vh] overflow-hidden rounded border border-zinc-700 bg-zinc-900 select-none"
+                                        onPointerDown={handlePreviewPointerDown}
+                                        onPointerMove={handlePreviewPointerMove}
+                                        onPointerUp={handlePreviewPointerUp}
+                                        onPointerLeave={handlePreviewPointerUp}
+                                        onPointerCancel={handlePreviewPointerUp}
+                                        onWheel={handlePreviewWheel}
+                                        onDragStart={(event) => event.preventDefault()}
+                                        style={{
+                                            touchAction: "none",
+                                            cursor: isPreviewPanning ? "grabbing" : "grab",
+                                            userSelect: "none",
+                                            WebkitUserSelect: "none"
+                                        }}
+                                    >
+                                        <div
+                                            ref={previewContentRef}
+                                            className="absolute inset-0 flex items-center justify-center"
+                                            style={{
+                                                transform: `translate3d(${previewOffset.x}px, ${previewOffset.y}px, 0) scale(${previewZoom})`,
+                                                transformOrigin: "center center",
+                                                willChange: "transform"
+                                            }}
+                                        >
+                                            <iframe
+                                                src={previewUrl}
+                                                title={previewDocument.original_name}
+                                                className="w-full h-full pointer-events-none select-none"
+                                            />
+                                        </div>
+                                    </div>
+                                ) : previewDocument.content_type.startsWith("image/") ? (
+                                    <div
+                                        className="relative w-full h-[72vh] overflow-hidden rounded border border-zinc-700 bg-zinc-900 select-none"
+                                        onPointerDown={handlePreviewPointerDown}
+                                        onPointerMove={handlePreviewPointerMove}
+                                        onPointerUp={handlePreviewPointerUp}
+                                        onPointerLeave={handlePreviewPointerUp}
+                                        onPointerCancel={handlePreviewPointerUp}
+                                        onWheel={handlePreviewWheel}
+                                        onDragStart={(event) => event.preventDefault()}
+                                        style={{
+                                            touchAction: "none",
+                                            cursor: isPreviewPanning ? "grabbing" : "grab",
+                                            userSelect: "none",
+                                            WebkitUserSelect: "none"
+                                        }}
+                                    >
+                                        <div
+                                            ref={previewContentRef}
+                                            className="absolute inset-0 flex items-center justify-center"
+                                            style={{
+                                                transform: `translate3d(${previewOffset.x}px, ${previewOffset.y}px, 0) scale(${previewZoom})`,
+                                                transformOrigin: "center center",
+                                                willChange: "transform"
+                                            }}
+                                        >
+                                            <img
+                                                src={previewUrl}
+                                                alt={previewDocument.original_name}
+                                                className="max-h-full max-w-full pointer-events-none object-contain select-none"
+                                                draggable={false}
+                                            />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-zinc-300 font-text">
+                                        Este arquivo não possui visualização. Faça o download para abrir.
+                                    </div>
+                                )
+                            )}
+                        </div>
+                        <div className="flex flex-col gap-3 bg-zinc-900/60 border border-zinc-700 rounded-lg p-3 h-[72vh]">
+                            <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm text-zinc-200 font-smalltitle">Anotações</div>
+                            </div>
+                            <div
+                                ref={annotationsListRef}
+                                className="flex-1 overflow-y-auto pr-2 scrollbar-ordo flex flex-col gap-2"
+                            >
+                                {isLoadingAnnotations && (
+                                    <div className="text-zinc-300 text-sm font-text">Carregando anotações...</div>
+                                )}
+                                {!isLoadingAnnotations && annotationsError && (
+                                    <div className="text-amber-300 text-sm font-text">{annotationsError}</div>
+                                )}
+                                {!isLoadingAnnotations && !annotationsError && documentAnnotations.length === 0 && (
+                                    <div className="text-zinc-400 text-sm font-text">Sem anotações ainda.</div>
+                                )}
+                                {!isLoadingAnnotations && !annotationsError && documentAnnotations.length > 0 && (
+                                    documentAnnotations.map((note) => {
+                                        const directoryEntry = characterDirectory[note.user_id]
+                                        const fallbackName = character && character.user_id === note.user_id
+                                            ? character.name
+                                            : `Agente #${note.user_id}`
+                                        const authorName = directoryEntry?.name ?? fallbackName
+                                        const authorAvatar = directoryEntry?.avatar
+                                            ?? (character && character.user_id === note.user_id ? character.avatar : null)
+                                        const avatarUrl = getAvatarUrl(authorAvatar)
+                                        return (
+                                            <div
+                                                key={`annotation-${note.id}`}
+                                                className="bg-zinc-800 border border-zinc-700 rounded p-2 flex flex-col gap-2"
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-9 h-9 rounded-full overflow-hidden bg-zinc-700 border border-zinc-600 flex items-center justify-center text-zinc-200 font-smalltitle text-xs">
+                                                        {avatarUrl ? (
+                                                            <img
+                                                                src={avatarUrl}
+                                                                alt={authorName}
+                                                                className="w-full h-full object-cover"
+                                                            />
+                                                        ) : (
+                                                            authorName
+                                                                .split(" ")
+                                                                .filter(Boolean)
+                                                                .slice(0, 2)
+                                                                .map((part) => part[0]?.toUpperCase())
+                                                                .join("") || "?"
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <div className="text-sm text-zinc-200 font-text">
+                                                            {authorName}
+                                                        </div>
+                                                        <div className="text-xs text-zinc-400">
+                                                            {formatTimestamp(note.created_at)}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-sm text-zinc-200 whitespace-pre-wrap">
+                                                    {note.body}
+                                                </div>
+                                            </div>
+                                        )
+                                    })
+                                )}
+                            </div>
+                            <AnnotationComposer
+                                key={previewDocument?.id ?? "no-doc"}
+                                disabled={!previewDocument || Boolean(annotationsError)}
+                                isSending={isSendingAnnotation}
+                                onSend={handleSendAnnotation}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+            <Modal
                 isOpen={isSaberPoderPromptOpen}
                 onClose={() => handleConfirmSaberPoder(false)}
                 className="w-[min(100%-1.5rem,24rem)] max-h-[90vh] overflow-hidden font-sans"
@@ -7615,7 +8665,7 @@ export default function CharacterSheet() {
                     <div className="text-zinc-200">
                         Selecione 2 perícias treinadas (exceto Luta e Pontaria).
                     </div>
-                    <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-1">
+                    <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto scrollbar-ordo pr-1">
                         {peritoSkillOptions.map((option) => {
                             const normalized = normalizeText(option.name)
                             const isSelected = peritoSkillDraft.some(
@@ -7928,3 +8978,7 @@ export default function CharacterSheet() {
         </MainLayout>
     )
 }
+
+
+
+

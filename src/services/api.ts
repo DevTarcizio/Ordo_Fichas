@@ -1,12 +1,28 @@
 ﻿import axios from "axios"
 
+const resolveBaseUrl = () => {
+    const envUrl = import.meta.env.VITE_API_URL as string | undefined
+    if (envUrl && envUrl.trim().length > 0) {
+        return envUrl
+    }
+    if (typeof window !== "undefined") {
+        const host = window.location.hostname
+        if (host === "localhost" || host === "127.0.0.1") {
+            return "http://localhost:8000/"
+        }
+    }
+    return "https://ordopraesdium-api.onrender.com/"
+}
+
+const baseURL = resolveBaseUrl()
+
 export const api = axios.create({
-    baseURL: "https://ordopraesdium-api.onrender.com/",
+    baseURL,
     withCredentials: true
 })
 
 const refreshApi = axios.create({
-    baseURL: "https://ordopraesdium-api.onrender.com/",
+    baseURL,
     withCredentials: true
 })
 

@@ -30,7 +30,7 @@ export default function ExpertiseEditModal({
             isOpen={isOpen}
             onClose={onClose}
             onSubmit={onSubmit}
-            className="w-[min(100%-1.5rem,72rem)] max-h-[85vh] overflow-y-auto p-4 md:p-6"
+            className="w-[min(100%-1.5rem,72rem)] max-h-[85vh] overflow-y-auto scrollbar-ordo p-4 md:p-6"
         >
             <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bigtitle text-2xl text-blue-400">Editar Perícias</h2>

@@ -1,11 +1,12 @@
 ﻿import { Trash2 } from "lucide-react"
 import { useAuth } from "../contexts/useAuth"
 import { useNavigate } from "react-router-dom"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import { formatEnum } from "../utils"
 import type { CharacterSummary } from "../types/character"
+import type { DocumentSummary } from "../types/document"
 import CompactStatusBar from "../components/CompactStatusBar"
 import {
     attributeKeyLabelMap,
@@ -49,6 +50,17 @@ const formatTimestamp = (value: string) => {
     } catch {
         return value
     }
+}
+
+const formatBytes = (value: number) => {
+    if (!Number.isFinite(value)) return ""
+    if (value < 1024) return `${value} B`
+    const kb = value / 1024
+    if (kb < 1024) return `${kb.toFixed(1)} KB`
+    const mb = kb / 1024
+    if (mb < 1024) return `${mb.toFixed(1)} MB`
+    const gb = mb / 1024
+    return `${gb.toFixed(1)} GB`
 }
 
 const getAvatarUrl = (avatar?: string | null) => {
@@ -408,6 +420,7 @@ type RealtimeMessage = {
     character_id?: number
     character_name?: string | null
     log?: ActionLogEntry
+    document?: DocumentSummary
 }
 
 const realtimeStatusFields = [
@@ -431,12 +444,26 @@ export default function Dashboard() {
     const [isLoadingLogs, setIsLoadingLogs] = useState(false)
     const [logsError, setLogsError] = useState<string | null>(null)
     const [isResettingHistory, setIsResettingHistory] = useState(false)
+    const [documents, setDocuments] = useState<DocumentSummary[]>([])
+    const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
+    const [documentsError, setDocumentsError] = useState<string | null>(null)
+    const [documentCharacterId, setDocumentCharacterId] = useState<number | "">("")
+    const [documentFoundLocation, setDocumentFoundLocation] = useState("")
+    const [documentFile, setDocumentFile] = useState<File | null>(null)
+    const [isUploadingDocument, setIsUploadingDocument] = useState(false)
+    const [uploadError, setUploadError] = useState<string | null>(null)
+    const [uploadSuccess, setUploadSuccess] = useState<string | null>(null)
+    const [releasingDocumentId, setReleasingDocumentId] = useState<number | null>(null)
+    const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null)
     const isFetchingRef = useRef(false)
+    const hasFetchedLogsRef = useRef(false)
+    const hasFetchedDocumentsRef = useRef(false)
     const refreshTimerRef = useRef<number | null>(null)
     const wsRef = useRef<WebSocket | null>(null)
     const wsReconnectRef = useRef<number | null>(null)
     const wsHeartbeatRef = useRef<number | null>(null)
     const wsRetryRef = useRef(0)
+    const documentFileInputRef = useRef<HTMLInputElement | null>(null)
 
     useEffect(() => {
         if (!user && !isLoading) {
@@ -448,7 +475,17 @@ export default function Dashboard() {
         if (!user || isFetchingRef.current) return
         isFetchingRef.current = true
         try {
-            const response = await api.get("/characters/list")
+            let response
+            try {
+                response = await api.get("/characters/list")
+            } catch (err) {
+                const status = (err as { response?: { status?: number } })?.response?.status
+                if (status === 404 && user.role === "master") {
+                    response = await api.get("/characters/list/all")
+                } else {
+                    throw err
+                }
+            }
             const formattedCharacters = response.data.characters.map((char: CharacterSummary) => ({
                 ...char,
                 origin: formatEnum(getOriginName(char.origin)),
@@ -475,10 +512,144 @@ export default function Dashboard() {
             const logs = Array.isArray(response.data?.logs) ? response.data.logs : []
             setActionLogs(logs as ActionLogEntry[])
         } catch (err) {
-            console.error("Erro ao buscar histórico de testes: ", err)
-            setLogsError("Erro ao buscar histórico de testes.")
+            const status = (err as { response?: { status?: number } })?.response?.status
+            if (status === 404) {
+                setActionLogs([])
+                setLogsError(null)
+            } else {
+                console.error("Erro ao buscar histórico de testes: ", err)
+                setLogsError("Erro ao buscar histórico de testes.")
+            }
         } finally {
             setIsLoadingLogs(false)
+            hasFetchedLogsRef.current = true
+        }
+    }, [user])
+
+    const fetchDocuments = useCallback(async () => {
+        if (!user || user.role !== "master") return
+        setIsLoadingDocuments(true)
+        setDocumentsError(null)
+        try {
+            const response = await api.get("/documents/")
+            const list = Array.isArray(response.data?.documents) ? response.data.documents : []
+            setDocuments(list as DocumentSummary[])
+        } catch (err) {
+            const status = (err as { response?: { status?: number } })?.response?.status
+            if (status === 404) {
+                setDocuments([])
+                setDocumentsError(null)
+            } else {
+                console.error("Erro ao buscar documentos: ", err)
+                setDocumentsError("Erro ao buscar documentos.")
+            }
+        } finally {
+            setIsLoadingDocuments(false)
+            hasFetchedDocumentsRef.current = true
+        }
+    }, [user])
+
+    const handleUploadDocument = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        if (!user || user.role !== "master") return
+        setUploadError(null)
+        setUploadSuccess(null)
+
+        if (!documentCharacterId) {
+            setUploadError("Selecione um personagem.")
+            return
+        }
+        if (!documentFoundLocation.trim()) {
+            setUploadError("Informe onde o documento foi encontrado.")
+            return
+        }
+        if (!documentFile) {
+            setUploadError("Selecione um arquivo para enviar.")
+            return
+        }
+
+        const formData = new FormData()
+        formData.append("file", documentFile)
+        formData.append("character_id", String(documentCharacterId))
+        formData.append("found_location", documentFoundLocation.trim())
+
+        try {
+            setIsUploadingDocument(true)
+            const response = await api.post("/documents/", formData, {
+                headers: { "Content-Type": "multipart/form-data" }
+            })
+            const created = response.data as DocumentSummary
+            setDocuments((prev) => [created, ...prev])
+            setUploadSuccess("Documento enviado com sucesso.")
+            setDocumentFile(null)
+            if (documentFileInputRef.current) {
+                documentFileInputRef.current.value = ""
+            }
+        } catch (err) {
+            console.error("Erro ao enviar documento: ", err)
+            setUploadError("Erro ao enviar documento.")
+        } finally {
+            setIsUploadingDocument(false)
+        }
+    }, [documentCharacterId, documentFile, documentFoundLocation, user])
+
+    const fetchDocumentBlob = useCallback(async (doc: DocumentSummary) => {
+        return api.get(`/documents/${doc.id}/file`, { responseType: "blob" })
+    }, [])
+
+    const handleDownloadDocument = useCallback(async (doc: DocumentSummary) => {
+        try {
+            const response = await fetchDocumentBlob(doc)
+            const blob = new Blob([response.data], { type: doc.content_type })
+            const url = window.URL.createObjectURL(blob)
+            const link = document.createElement("a")
+            link.href = url
+            link.download = doc.original_name
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            window.URL.revokeObjectURL(url)
+        } catch (err) {
+            console.error("Erro ao baixar documento: ", err)
+            alert("Erro ao baixar documento.")
+        }
+    }, [fetchDocumentBlob])
+
+    const handleSetDocumentRelease = useCallback(async (
+        doc: DocumentSummary,
+        isReleased: boolean,
+        releasedToUserId?: number | null
+    ) => {
+        if (!user || user.role !== "master") return
+        try {
+            setReleasingDocumentId(doc.id)
+            const payload = isReleased
+                ? { is_released: true, released_to_user_id: releasedToUserId }
+                : { is_released: false }
+            const response = await api.patch(`/documents/${doc.id}/release`, payload)
+            const updated = response.data as DocumentSummary
+            setDocuments((prev) => prev.map((item) => (item.id === doc.id ? updated : item)))
+        } catch (err) {
+            console.error("Erro ao atualizar documento: ", err)
+            alert("Erro ao atualizar documento.")
+        } finally {
+            setReleasingDocumentId(null)
+        }
+    }, [user])
+
+    const handleDeleteDocument = useCallback(async (doc: DocumentSummary) => {
+        if (!user || user.role !== "master") return
+        const confirmDelete = window.confirm("Deseja realmente excluir este documento?")
+        if (!confirmDelete) return
+        try {
+            setDeletingDocumentId(doc.id)
+            await api.delete(`/documents/${doc.id}`)
+            setDocuments((prev) => prev.filter((item) => item.id !== doc.id))
+        } catch (err) {
+            console.error("Erro ao excluir documento: ", err)
+            alert("Erro ao excluir documento.")
+        } finally {
+            setDeletingDocumentId(null)
         }
     }, [user])
 
@@ -526,13 +697,24 @@ export default function Dashboard() {
 
     useEffect(() => {
         if (!user || user.role !== "master") return
-        if (actionLogs.length > 0 || isLoadingLogs) return
+        if (hasFetchedLogsRef.current || isLoadingLogs) return
         void fetchActionLogs()
-    }, [user, actionLogs.length, isLoadingLogs, fetchActionLogs])
+    }, [user, isLoadingLogs, fetchActionLogs])
+
+    useEffect(() => {
+        if (!user || user.role !== "master") return
+        if (hasFetchedDocumentsRef.current || isLoadingDocuments) return
+        void fetchDocuments()
+    }, [user, isLoadingDocuments, fetchDocuments])
 
     useEffect(() => {
         void fetchCharacters()
     }, [fetchCharacters])
+
+    useEffect(() => {
+        if (documentCharacterId !== "" || characters.length === 0) return
+        setDocumentCharacterId(characters[0].id)
+    }, [characters, documentCharacterId])
 
     useEffect(() => {
         if (!user || user.role !== "master") return
@@ -540,6 +722,7 @@ export default function Dashboard() {
         const refresh = () => {
             void fetchCharacters()
             void fetchActionLogs()
+            void fetchDocuments()
         }
 
         window.addEventListener("focus", refresh)
@@ -619,6 +802,18 @@ export default function Dashboard() {
                     return
                 }
 
+                if (data.type.startsWith("document_")) {
+                    if (!data.document || typeof data.document.id !== "number") return
+                    setDocuments((prev) => {
+                        const filtered = prev.filter((doc) => doc.id !== data.document?.id)
+                        const next = [data.document as DocumentSummary, ...filtered]
+                        return next.sort(
+                            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                        )
+                    })
+                    return
+                }
+
                 if (data.type === "character_updated" || data.type === "character_created") {
                     if (!data.character || typeof data.character.id !== "number") return
                     const didUpdate = applyStatusUpdate(data.character)
@@ -659,7 +854,7 @@ export default function Dashboard() {
             }
             wsRef.current = null
         }
-    }, [user, token, fetchCharacters, fetchActionLogs, applyStatusUpdate])
+    }, [user, token, fetchCharacters, fetchActionLogs, fetchDocuments, applyStatusUpdate])
 
     if (isLoading) {
         return null
@@ -888,6 +1083,98 @@ export default function Dashboard() {
             )
         }
 
+        const renderDocuments = () => {
+            if (isLoadingDocuments) {
+                return <p className="text-zinc-300 font-text">Carregando documentos...</p>
+            }
+            if (documentsError) {
+                return <p className="text-red-400 font-text">{documentsError}</p>
+            }
+            if (documents.length === 0) {
+                return <p className="text-zinc-300 font-text">Nenhum documento encontrado.</p>
+            }
+            return (
+                <div className="flex flex-col gap-3 max-h-[28rem] overflow-y-auto pr-2 scrollbar-ordo">
+                    {documents.map((doc) => {
+                        const characterName = characterMap.get(doc.character_id)?.name ?? `Personagem #${doc.character_id}`
+                        const releaseCharacter = characterMap.get(doc.character_id)
+                        return (
+                            <div
+                                key={`document-${doc.id}`}
+                                className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-2"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="text-zinc-200 font-text truncate">{doc.original_name}</div>
+                                    <span
+                                        className={`text-xs font-smalltitle ${doc.is_released ? "text-emerald-400" : "text-amber-400"}`}
+                                    >
+                                        {doc.is_released ? "Liberado" : "Bloqueado"}
+                                    </span>
+                                </div>
+                                <div className="text-xs text-zinc-400">
+                                    Personagem: {characterName}
+                                </div>
+                                <div className="text-xs text-zinc-400">
+                                    Local: {doc.found_location}
+                                </div>
+                                <div className="text-xs text-zinc-500">
+                                    {formatTimestamp(doc.created_at)} · {formatBytes(doc.size_bytes)}
+                                </div>
+                                <div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDownloadDocument(doc)}
+                                            className="px-3 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition"
+                                        >
+                                            Baixar arquivo
+                                        </button>
+                                        {!doc.is_released ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (!releaseCharacter?.user_id) {
+                                                        alert("Personagem não encontrado para liberar.")
+                                                        return
+                                                    }
+                                                    void handleSetDocumentRelease(
+                                                        doc,
+                                                        true,
+                                                        releaseCharacter.user_id
+                                                    )
+                                                }}
+                                                disabled={releasingDocumentId === doc.id}
+                                                className="px-3 py-1 rounded text-xs font-smalltitle bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                            >
+                                                {releasingDocumentId === doc.id ? "Liberando..." : "Desbloquear"}
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSetDocumentRelease(doc, false)}
+                                                disabled={releasingDocumentId === doc.id}
+                                                className="px-3 py-1 rounded text-xs font-smalltitle bg-amber-600 text-white hover:bg-amber-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                            >
+                                                {releasingDocumentId === doc.id ? "Bloqueando..." : "Bloquear"}
+                                            </button>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeleteDocument(doc)}
+                                            disabled={deletingDocumentId === doc.id}
+                                            className="px-3 py-1 rounded text-xs font-smalltitle bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            {deletingDocumentId === doc.id ? "Excluindo..." : "Excluir"}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            )
+        }
+
         return (
             <div className="w-full px-4 md:px-8 flex flex-col gap-6">
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 w-full">
@@ -914,6 +1201,106 @@ export default function Dashboard() {
                             </button>
                         </div>
                         {renderHistory()}
+                    </div>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
+                    <div className="flex items-center justify-between gap-4">
+                        <h2 className="text-2xl text-blue-500 font-bigtitle">
+                            Documentos
+                        </h2>
+                    </div>
+                    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)] gap-6">
+                        <form
+                            onSubmit={handleUploadDocument}
+                            className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-4"
+                        >
+                            <div className="flex flex-col gap-2">
+                                <label className="text-sm text-zinc-300 font-text">Personagem</label>
+                                <select
+                                    className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-100 font-text"
+                                    value={documentCharacterId}
+                                    onChange={(event) => {
+                                        const value = event.target.value
+                                        setDocumentCharacterId(value ? Number(value) : "")
+                                    }}
+                                >
+                                    {characters.length === 0 && (
+                                        <option value="">Nenhum personagem encontrado</option>
+                                    )}
+                                    {characters.map((char) => (
+                                        <option key={`doc-char-${char.id}`} value={char.id}>
+                                            {char.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <label className="text-sm text-zinc-300 font-text">Local encontrado</label>
+                                <input
+                                    type="text"
+                                    className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-100 font-text"
+                                    value={documentFoundLocation}
+                                    onChange={(event) => setDocumentFoundLocation(event.target.value)}
+                                    placeholder="Ex.: Biblioteca, sala de arquivos..."
+                                />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <label className="text-sm text-zinc-300 font-text">Arquivo</label>
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <label
+                                        htmlFor="document-upload"
+                                        className="inline-flex items-center justify-center px-3 py-2 rounded text-sm font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition cursor-pointer"
+                                    >
+                                        Escolher arquivo
+                                    </label>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDocumentFile(null)
+                                            if (documentFileInputRef.current) {
+                                                documentFileInputRef.current.value = ""
+                                            }
+                                        }}
+                                        className="inline-flex items-center justify-center px-3 py-2 rounded text-sm font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition"
+                                        disabled={!documentFile}
+                                    >
+                                        Remover arquivo
+                                    </button>
+                                    <span className="text-xs text-zinc-400">
+                                        {documentFile ? `${documentFile.name} (${formatBytes(documentFile.size)})` : "Nenhum arquivo selecionado"}
+                                    </span>
+                                </div>
+                                <input
+                                    id="document-upload"
+                                    ref={documentFileInputRef}
+                                    type="file"
+                                    accept=".pdf,.png,.jpg,.jpeg"
+                                    className="sr-only"
+                                    onChange={(event) => {
+                                        const file = event.target.files?.[0] ?? null
+                                        setDocumentFile(file)
+                                    }}
+                                />
+                            </div>
+                            {uploadError && <p className="text-sm text-red-400">{uploadError}</p>}
+                            {uploadSuccess && <p className="text-sm text-emerald-400">{uploadSuccess}</p>}
+                            <button
+                                type="submit"
+                                disabled={isUploadingDocument}
+                                className="mt-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded text-white font-smalltitle transition disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                                {isUploadingDocument ? "Enviando..." : "Enviar documento"}
+                            </button>
+                            <p className="text-xs text-zinc-400">
+                                Máximo 20 MB. Formatos aceitos: PDF, PNG, JPG.
+                            </p>
+                        </form>
+                        <div className="flex flex-col gap-3">
+                            <h3 className="text-lg text-zinc-200 font-smalltitle">
+                                Arquivos enviados
+                            </h3>
+                            {renderDocuments()}
+                        </div>
                     </div>
                 </div>
             </div>
