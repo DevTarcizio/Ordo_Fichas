@@ -71,6 +71,9 @@ export type CharacterSummary = {
     character_class: string
     rank: string
     origin: string | OriginSummary | null
+    subclass?: string
+    trail?: string
+    nex_total?: number
     healthy_points?: number
     healthy_max?: number
     sanity_points?: number

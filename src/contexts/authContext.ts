@@ -2,6 +2,7 @@
 
 type User = {
     email: string
+    username?: string
     role: "master" | "player"
 }
 

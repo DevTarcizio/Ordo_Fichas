@@ -7,6 +7,7 @@ import type { User } from "./authContext"
 
 type AuthTokenPayload = JwtPayload & {
     sub: string
+    username?: string
     role: "master" | "player"
     exp: number
 }
@@ -15,7 +16,7 @@ function decodeToken(token: string): User | null {
     try {
         const decoded = jwtDecode<AuthTokenPayload>(token)
         if (decoded.sub && decoded.role) {
-            return { email: decoded.sub, role: decoded.role }
+            return { email: decoded.sub, role: decoded.role, username: decoded.username }
         }
         throw new Error("token inválido: falta sub ou role")
     } catch (err) {
@@ -107,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const now = Date.now()
 
                 if (decoded.sub && decoded.role && decoded.exp && expMs > now) {
-                    setUser({ email: decoded.sub, role: decoded.role })
+                    setUser({ email: decoded.sub, role: decoded.role, username: decoded.username })
                     setToken(stored)
                     scheduleRefresh(stored)
                     if (isMounted) setIsLoading(false)

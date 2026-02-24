@@ -104,7 +104,6 @@ export default function CreateCharacter() {
         age: "",
         avatar: "",
 
-        nex_total: "",
         nex_class: "",
         nex_subclass: "",
 
@@ -115,8 +114,6 @@ export default function CreateCharacter() {
         rank: "",
         trail: "",
         subclass: "",
-        investigation_points: "",
-        investigation_max: "",
 
         atrib_agility: 1,
         atrib_intellect: 1,
@@ -183,13 +180,11 @@ export default function CreateCharacter() {
         }
         const allowedNexClasses = new Set(["combatente", "especialista", "ocultista"])
         const hasInvalidNex =
-            form.nex_total !== "0" ||
             form.nex_class !== "0" ||
             form.nex_subclass !== "0"
         if (!allowedNexClasses.has(form.character_class) && hasInvalidNex) {
             setForm(prev => ({
                 ...prev,
-                nex_total: "0",
                 nex_class: "0",
                 nex_subclass: "0"
             }))
@@ -208,7 +203,6 @@ export default function CreateCharacter() {
         form.character_class,
         form.subclass,
         form.trail,
-        form.nex_total,
         form.nex_class,
         form.nex_subclass
     ])
@@ -307,7 +301,7 @@ export default function CreateCharacter() {
 
     const canTrainExpertise = ["mundano", "combatente", "especialista", "ocultista"].includes(form.character_class)
     const intellectValue = Math.max(0, Number(form.atrib_intellect) || 0)
-    const nexTotalValue = Math.max(0, Number(form.nex_total) || 0)
+    const nexTotalValue = Math.max(0, Number(form.nex_class) || 0) + Math.max(0, Number(form.nex_subclass) || 0)
     const attributePoints = useMemo(() => {
         if (nexTotalValue >= 95) return 8
         if (nexTotalValue >= 80) return 7
@@ -475,12 +469,9 @@ export default function CreateCharacter() {
                 trail_id: Number(form.trail_id),
                 trail: form.trail,
                 subclass: form.subclass,
-                nex_total: Number(form.nex_total),
                 nex_class: Number(form.nex_class),
                 nex_subclass: Number(form.nex_subclass),
                 expertise_training,
-                investigation_points: Number(form.investigation_points),
-                investigation_max: Number(form.investigation_points),
                 atrib_agility: Number(form.atrib_agility),
                 atrib_intellect: Number(form.atrib_intellect),
                 atrib_vitallity: Number(form.atrib_vitallity),
@@ -673,17 +664,8 @@ export default function CreateCharacter() {
                                     </div>
                                 </div>
 
-
                                 {/* Quarta Linha */}
-                                <div className="grid w-full grid-cols-3 gap-4 mt-2"> 
-                                    <FloatingInput 
-                                        label="Nex Total"
-                                        name="nex_total" 
-                                        type="number"
-                                        value={form.nex_total} 
-                                        onChange={handleChange}
-                                    />
-
+                                <div className="grid w-full grid-cols-2 gap-4 mt-2"> 
                                     <FloatingInput 
                                         label="Nex da Classe"
                                         name="nex_class" 
@@ -701,16 +683,6 @@ export default function CreateCharacter() {
                                     />
                                 </div>
 
-                                {/* Quinta Linha */}
-                                <div className="grid w-full grid-cols-1 gap-4 mt-2">
-                                    <FloatingInput
-                                        label="Pontos de Investigação" 
-                                        name="investigation_points" 
-                                        type="number"
-                                        value={form.investigation_points}
-                                        onChange={handleChange}
-                                    />
-                                </div>
 
                                     </div>
 
@@ -724,8 +696,9 @@ export default function CreateCharacter() {
                                     Atributos
                                 </h2>
                                 <div className="text-sm text-zinc-300 font-text text-center mb-4">
-                                    Com NEX total {nexTotalValue}%, você tem {attributePoints} pontos de atributo para
-                                    distribuir. Valor máximo inicial: 3.
+                                    Você tem {attributePoints} pontos de atributo para distribuir.
+                                    <br />
+                                    Valor máximo inicial: 3.
                                 </div>
                                 <div className="w-full flex justify-center mt-10">
                                     <AttributesCard
@@ -912,6 +885,5 @@ export default function CreateCharacter() {
         
     )
 }
-
 
 

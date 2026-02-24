@@ -86,7 +86,7 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            className="w-full max-w-md p-8"
+            className="w-full max-w-md p-8 border-amber-500/70"
         >
             {/* Botão de Fechar */}
             <button
@@ -96,15 +96,15 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
                 <X />
             </button>
 
-            <h1 className="font-bigtitle text-3xl mb-6 text-center">
-                {isLogin ? "Entrar" : "Criar Conta"}
+            <h1 className="font-elegant_text text-3xl mb-6 text-center">
+                {isLogin ? "ENTRAR" : "CRIAR CONTA"}
             </h1>
 
             {error && (
-                <p className="text-red-500 text-center mb-2">{error}</p>
+                <p className="text-red-500 text-center mb-2 font-simple_text">{error}</p>
             )}
 
-            <form className="flex flex-col gap-4">
+            <form className="flex flex-col gap-4 font-simple_text">
                 {!isLogin && (
                     <input
                         type="text"
@@ -126,7 +126,7 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
                 <input
                     type="password"
                     placeholder="Senha"
-                    className="input_password"
+                    className="input"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                 />
@@ -135,7 +135,7 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
                     <input
                         type="password"
                         placeholder="Confirmar senha"
-                        className="input_password"
+                        className="input"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                     />
@@ -173,7 +173,7 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
                     type="button"
                     onClick={handleSubmit}
                     disabled={loading}
-                    className="mt-4 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 transition font-smalltitle disabled:opacity-50"
+                    className={`mt-4 py-3 rounded-lg transition font-simple_text disabled:opacity-50 bg-yellow-700 hover:bg-yellow-600 text-white`}
                 >
                     {loading ? "Carregando..." : isLogin ? "Entrar" : "Cadastrar"}
                 </button>

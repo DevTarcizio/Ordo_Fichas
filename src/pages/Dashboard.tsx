@@ -26,6 +26,11 @@ const getOriginName = (origin: CharacterSummary["origin"]) => {
     return ""
 }
 
+const replaceNoneLabel = (value: string) => {
+    if (!value) return value
+    return value.trim().toLowerCase() === "none" ? "Não possui" : value
+}
+
 const getStatusValue = (
     character: CharacterSummary,
     field: StatusField | StatusMaxField
@@ -886,58 +891,80 @@ export default function Dashboard() {
         return (
             <div className="w-full px-4 md:px-8 flex flex-col gap-6">
                 <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full mb-8">
-                    <h2 className="text-2xl text-blue-500 font-bigtitle mb-4">Personagens</h2>
+                    <h2 className="text-2xl text-amber-500 font-elegant_text mb-4">PERSONAGENS</h2>
 
                     {/* Lista de Personagens */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 w-full">
                         {characters.length === 0 ? (
                             <p className="text-zinc-300 font-text">Não existem personagens criados</p>
                         ) : (
-                            characters.map((char) => (
-                                <div
-                                    key={char.id}
-                                    className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-1 w-full"
-                                >
-                                    <div className="flex justify-between items-center">
-                                        <h3 className="text-blue-400 font-smalltitle text-lg">
-                                            {char.name}
-                                        </h3>
-                                        {/* Botão de excluir */}
+                            characters.map((char) => {
+                                const avatarUrl = getAvatarUrl(char.avatar)
+                                const trailLabel = replaceNoneLabel(char.trail ? formatEnum(char.trail) : "—")
+                                const subclassLabel = replaceNoneLabel(char.subclass ? formatEnum(char.subclass) : "—")
+                                const originLabel = replaceNoneLabel(formatEnum(getOriginName(char.origin))) || "Desconhecida"
+                                const nexTotalLabel =
+                                    typeof char.nex_total === "number" ? `${char.nex_total}%` : "—"
+                                return (
+                                    <div
+                                        key={char.id}
+                                        className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 w-full flex flex-col gap-4"
+                                    >
+                                        <div className="flex items-start justify-between gap-4">
+                                            <h3 className="text-amber-500 font-elegant_text text-lg truncate">
+                                                {char.name}
+                                            </h3>
+                                            {/* Botão de excluir */}
+                                            <button
+                                                onClick={() => handleDeleteCharacter(char.id)}
+                                                className="w-8 h-8 flex items-center justify-center bg-red-500 hover:bg-red-600 transition text-white rounded shrink-0"
+                                                title="Excluir personagem"
+                                            >
+                                                <Trash2 size={18} />
+                                            </button>
+                                        </div>
+
+                                        <div className="flex items-start gap-4 min-w-0">
+                                            {avatarUrl && (
+                                                <img
+                                                    src={avatarUrl}
+                                                    alt={char.name}
+                                                    className="w-24 h-24 rounded-full border border-zinc-600 object-cover"
+                                                />
+                                            )}
+                                            <div className="w-px bg-zinc-600/80 self-stretch" />
+                                            <div className="grid grid-cols-2 gap-x-6 gap-y-1 min-w-0">
+                                                <p className="text-zinc-300 font-text">Classe: {char.character_class}</p>
+                                                <p className="text-zinc-300 font-text">Trilha: {trailLabel}</p>
+                                                <p className="text-zinc-300 font-text">Patente: {char.rank}</p>
+                                                <p className="text-zinc-300 font-text">Subclasse: {subclassLabel}</p>
+                                                <p className="text-zinc-300 font-text">
+                                                    Origem: {originLabel}
+                                                </p>
+                                                <p className="text-zinc-300 font-text">NEX total: {nexTotalLabel}</p>
+                                            </div>
+                                        </div>
+
                                         <button
-                                            onClick={() => handleDeleteCharacter(char.id)}
-                                            className="w-8 h-8 flex items-center justify-center bg-red-500 hover:bg-red-600 transition text-white rounded"
-                                            title="Excluir personagem"
+                                            className="w-full py-2 px-4 bg-yellow-700 hover:bg-yellow-600 rounded text-white font-simple_text transition"
+                                            onClick={() => { navigate(`/characters/${char.id}`) }}
                                         >
-                                            <Trash2 size={18} />
+                                            Ver Ficha
                                         </button>
                                     </div>
-
-                                    <p className="text-zinc-300 font-text">Classe: {char.character_class}</p>
-                                    <p className="text-zinc-300 font-text">Patente: {char.rank}</p>
-                                    <p className="text-zinc-300 font-text">
-                                        Origem: {formatEnum(getOriginName(char.origin)) || "Desconhecida"}
-                                    </p>
-                                    <p className="text-zinc-300 font-text">Idade: {char.age}</p>
-
-                                    <button
-                                        className="mt-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded text-white font-smalltitle transition"
-                                        onClick={() => { navigate(`/characters/${char.id}`) }}
-                                    >
-                                        Ver Ficha
-                                    </button>
-                                </div>
-                            ))
+                                )
+                            })
                         )}
                     </div>
 
                     {/* Card Criar Personagem */}
                     <div className="bg-zinc-800 border border-zinc-600 rounded-lg p-4 flex flex-col gap-3 w-full">
-                        <h3 className="text-blue-400 text-xl font-smalltitle">Criar Personagem</h3>
-                        <p className="text-zinc-300 font-text">
+                        <h3 className="text-amber-500 text-xl font-elegant_text">Criar Personagem</h3>
+                        <p className="text-zinc-300 font-simple_text">
                             Crie seu personagem e comece sua aventura!
                         </p>
                         <button
-                            className="mt-2 py-3 px-6 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-smalltitle transition w-full"
+                            className="mt-2 py-3 px-6 bg-yellow-700 hover:bg-yellow-600 rounded-lg text-white font-simple_text transition w-full"
                             onClick={() => navigate("/characters/create")}
                         >
                             Criar Personagem
@@ -967,11 +994,11 @@ export default function Dashboard() {
                                 className="bg-zinc-800 border border-zinc-700 rounded-lg p-4 flex flex-col gap-3"
                             >
                                 <div className="flex items-center justify-between gap-4 min-w-0">
-                                    <h3 className="flex-1 min-w-0 text-blue-400 font-smalltitle text-lg leading-5 h-10 clamp-2">
+                                    <h3 className="flex-1 min-w-0 text-amber-400 font-smalltitle text-lg leading-5 h-10 clamp-2">
                                         {char.name}
                                     </h3>
                                     <button
-                                        className="py-2 px-3 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-smalltitle transition"
+                                        className="py-2 px-3 bg-amber-500 hover:bg-amber-600 rounded text-white text-sm font-smalltitle transition"
                                         onClick={() => navigate(`/characters/${char.id}`)}
                                     >
                                         Ver ficha
@@ -1019,7 +1046,7 @@ export default function Dashboard() {
                 return <p className="text-zinc-300 font-text">Nenhum teste registrado.</p>
             }
             return (
-                <div className="flex flex-col gap-3 max-h-[44rem] overflow-y-auto pr-2 scrollbar-ordo">
+                <div className="flex flex-col gap-3 max-h-176 overflow-y-auto pr-2 scrollbar-ordo">
                     {actionLogs.map((log) => {
                         const summary = buildLogSummary(log)
                         const actionLabel = actionTypeLabels[log.action_type] ?? formatEnum(log.action_type)
@@ -1094,7 +1121,7 @@ export default function Dashboard() {
                 return <p className="text-zinc-300 font-text">Nenhum documento encontrado.</p>
             }
             return (
-                <div className="flex flex-col gap-3 max-h-[28rem] overflow-y-auto pr-2 scrollbar-ordo">
+                <div className="flex flex-col gap-3 max-h-112 overflow-y-auto pr-2 scrollbar-ordo">
                     {documents.map((doc) => {
                         const characterName = characterMap.get(doc.character_id)?.name ?? `Personagem #${doc.character_id}`
                         const releaseCharacter = characterMap.get(doc.character_id)
@@ -1125,7 +1152,7 @@ export default function Dashboard() {
                                         <button
                                             type="button"
                                             onClick={() => handleDownloadDocument(doc)}
-                                            className="px-3 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition"
+                                            className="px-3 py-1 rounded text-xs font-smalltitle bg-amber-500 text-white hover:bg-amber-600 transition"
                                         >
                                             Baixar arquivo
                                         </button>
@@ -1180,7 +1207,7 @@ export default function Dashboard() {
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 w-full">
                     <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
                         <div className="flex items-center justify-between gap-4">
-                            <h2 className="text-2xl text-blue-500 font-bigtitle">
+                            <h2 className="text-2xl text-amber-500 font-bigtitle">
                                 Status dos Personagens
                             </h2>
                         </div>
@@ -1188,7 +1215,7 @@ export default function Dashboard() {
                     </div>
                     <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
                         <div className="flex items-center justify-between gap-4">
-                            <h2 className="text-2xl text-blue-500 font-bigtitle">
+                            <h2 className="text-2xl text-amber-500 font-bigtitle">
                                 Histórico de Testes
                             </h2>
                             <button
@@ -1205,7 +1232,7 @@ export default function Dashboard() {
                 </div>
                 <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-6 shadow-md flex flex-col gap-6 w-full">
                     <div className="flex items-center justify-between gap-4">
-                        <h2 className="text-2xl text-blue-500 font-bigtitle">
+                        <h2 className="text-2xl text-amber-500 font-bigtitle">
                             Documentos
                         </h2>
                     </div>
@@ -1249,7 +1276,7 @@ export default function Dashboard() {
                                 <div className="flex flex-wrap items-center gap-3">
                                     <label
                                         htmlFor="document-upload"
-                                        className="inline-flex items-center justify-center px-3 py-2 rounded text-sm font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition cursor-pointer"
+                                        className="inline-flex items-center justify-center px-3 py-2 rounded text-sm font-smalltitle bg-amber-500 text-white hover:bg-amber-600 transition cursor-pointer"
                                     >
                                         Escolher arquivo
                                     </label>
@@ -1287,7 +1314,7 @@ export default function Dashboard() {
                             <button
                                 type="submit"
                                 disabled={isUploadingDocument}
-                                className="mt-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded text-white font-smalltitle transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                className="mt-2 py-2 px-4 bg-amber-500 hover:bg-amber-600 rounded text-white font-smalltitle transition disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                                 {isUploadingDocument ? "Enviando..." : "Enviar documento"}
                             </button>
@@ -1311,9 +1338,9 @@ export default function Dashboard() {
         <MainLayout>
             <div className="w-full flex justify-between items-center p-6">
                 <div>
-                    <h1 className="text-4xl font-bigtitle">Dashboard</h1>
+                    <h1 className="text-4xl font-elegant_text">DASHBOARD</h1>
                     <p>
-                        Bem-vindo, <span className="font-text">{user.email}</span>!
+                        Bem-vindo, <span className="font-text">{user.username ?? user.email}</span>!
                     </p>
                 </div>
 

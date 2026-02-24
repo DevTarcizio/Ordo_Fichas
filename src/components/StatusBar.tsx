@@ -1,3 +1,4 @@
+import { memo } from "react"
 import type { LucideIcon } from "lucide-react"
 import { ChevronsLeft, ChevronLeft, ChevronsRight, ChevronRight } from "lucide-react"
 
@@ -11,7 +12,7 @@ interface StatusBarProps {
     readOnly?: boolean
 }
 
-export default function StatusBar({ label, current, max, icon: Icon, gradient, onChange, readOnly }: StatusBarProps) {
+function StatusBarBase({ label, current, max, icon: Icon, gradient, onChange, readOnly }: StatusBarProps) {
     const normalizedCurrent = Number.isFinite(current) ? current : 0
     const normalizedMax = Number.isFinite(max) ? max : 0
     const safeMax = normalizedMax > 0 ? normalizedMax : 1
@@ -82,8 +83,8 @@ export default function StatusBar({ label, current, max, icon: Icon, gradient, o
             {/* Barra */}
             <div className="relative w-full h-8 bg-zinc-700 rounded overflow-hidden">
                 <div 
-                    className={`h-full ${gradient} transition-all duration-500`}
-                    style={{width: `${percent}%`}}
+                    className={`h-full w-full ${gradient} transition-transform duration-500 will-change-transform`}
+                    style={{ transform: `scaleX(${percent / 100})`, transformOrigin: "left" }}
                 />
 
                 <div className="absolute inset-0 flex items-center justify-center text-lg font-text text-white drop-shadow">
@@ -93,3 +94,16 @@ export default function StatusBar({ label, current, max, icon: Icon, gradient, o
         </div>
     )
 }
+
+const StatusBar = memo(
+    StatusBarBase,
+    (prev, next) =>
+        prev.label === next.label &&
+        prev.current === next.current &&
+        prev.max === next.max &&
+        prev.icon === next.icon &&
+        prev.gradient === next.gradient &&
+        prev.readOnly === next.readOnly
+)
+
+export default StatusBar

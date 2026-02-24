@@ -496,6 +496,11 @@ const normalizeText = (value: string) =>
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
 
+const replaceNoneLabel = (value: string) => {
+    if (!value) return value
+    return normalizeText(value) === "none" ? "Não possui" : value
+}
+
 const formatTimestamp = (value: string) => {
     if (!value) return ""
     try {
@@ -4029,7 +4034,9 @@ export default function CharacterSheet() {
         typeof character.origin === "string"
             ? character.origin
             : formatEnum(getOriginName(character.origin))
-    const trailLabel = character.trail || "Sem trilha"
+    const originLabelDisplay = replaceNoneLabel(originLabel)
+    const trailLabel = replaceNoneLabel(character.trail || "Sem trilha")
+    const subclassLabel = replaceNoneLabel(character.subclass)
     const abilities = (character.abilities ?? []).slice().sort((a, b) =>
         a.name.localeCompare(b.name, "pt-BR")
     )
@@ -6046,7 +6053,7 @@ export default function CharacterSheet() {
                 <div className="max-w-7xl mx-auto flex flex-col gap-2">
                     {/* Header */}
                     <div className="flex justify-between items-center">
-                        <h1 className="text-3xl font-bigtitle text-blue-500">
+                        <h1 className="text-3xl font-elegant_text text-amber-500">
                             {character.name}
                         </h1>
                         <button
@@ -6061,7 +6068,7 @@ export default function CharacterSheet() {
                         {/* Card informações */}
                         <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md">
                             <div className="flex justify-between items-center">
-                                <h1 className="text-blue-400 font-smalltitle mb-4 text-2xl">
+                                <h1 className="text-amber-500 font-elegant_text mb-4 text-2xl">
                                     Informações Principais
                                 </h1>
                                 <button
@@ -6097,7 +6104,7 @@ export default function CharacterSheet() {
                                             <Info size={16} />
                                         </button>
                                     </div>
-                                    <span className="text-white font-text text-lg">{originLabel}</span>
+                                    <span className="text-white font-text text-lg">{originLabelDisplay}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
@@ -6107,7 +6114,7 @@ export default function CharacterSheet() {
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
                                     <span className="text-zinc-300 font-text">Subclasse</span>
-                                    <span className="text-white font-text text-lg">{character.subclass}</span>
+                                    <span className="text-white font-text text-lg">{subclassLabel}</span>
                                 </div>
 
                                 <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
@@ -6361,7 +6368,7 @@ export default function CharacterSheet() {
                     </button>
                 </div>
                 <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
-                    <div className="text-lg text-white">{originLabel}</div>
+                    <div className="text-lg text-white">{originLabelDisplay}</div>
                     <div className="flex flex-col gap-1">
                         <span className="text-zinc-400 text-sm">Descrição</span>
                         <span className="text-zinc-200">

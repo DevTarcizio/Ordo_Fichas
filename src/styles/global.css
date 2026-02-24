@@ -18,28 +18,40 @@
 
 @font-face {
   font-family: "BigTitles";
-  src: url("/src/assets/fonts/exodus_stripped.otf") format("opentype");
+  src: url("/fonts/exodus_stripped.otf") format("opentype");
   font-weight: normal;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
   font-family: "SmallTitles";
-  src: url("/src/assets/fonts/exodus.otf") format("opentype");
+  src: url("/fonts/exodus.otf") format("opentype");
   font-weight: normal;
   font-style: normal;
+  font-display: swap;
+}
+
+
+@font-face {
+  font-family: "elegant_text";
+  src: url("/fonts/CinzelDecorative-Regular.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
-  font-family: "Text";
-  src: url("/src/assets/fonts/old_style.TTF") format("truetype");
+  font-family: "simple_text";
+  src: url("/fonts/Forum-Regular.ttf") format("truetype");
   font-weight: normal;
   font-style: normal;
+  font-display: swap;
 }
 
 @font-face {
   font-family: "StatusBar";
-  src: url("/src/assets/fonts/Teko-Regular.TTF") format("truetype");
+  src: url("/fonts/Teko-Regular.TTF") format("truetype");
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -58,11 +70,7 @@
 }
 
 .input {
-  @apply px-4 py-3 rounded-lg bg-zinc-800 border border-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 font-text text-white;
-}
-
-.input_password {
-  @apply px-4 py-3 rounded-lg bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-600 font-smalltitle;
+  @apply px-4 py-3 rounded-lg bg-zinc-800 border border-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-500 font-text text-white;
 }
 
 .scrollbar-ordo {
