@@ -8,6 +8,7 @@ export type DocumentSummary = {
     is_released: boolean
     released_to_user_id?: number | null
     is_shared_to_all?: boolean
+    shared_user_ids?: number[]
     released_at?: string | null
     created_at: string
 }

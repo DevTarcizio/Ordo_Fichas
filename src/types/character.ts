@@ -28,7 +28,7 @@ export type WeaponSummary = {
     id: number
     name: string
     description: string
-    category: string
+    category: number
     damage_formula: string
     threat_margin: number
     critical_multiplier: number
@@ -42,7 +42,7 @@ export type ItemSummary = {
     id: number
     name: string
     description: string
-    category: string
+    category: number
     space: number
 }
 
@@ -74,6 +74,7 @@ export type CharacterSummary = {
     subclass?: string
     trail?: string
     nex_total?: number
+    paranormal_affinity?: string | null
     healthy_points?: number
     healthy_max?: number
     sanity_points?: number
@@ -116,6 +117,7 @@ export type CharacterDetails = CharacterSummary & {
     atrib_strength: number
     displacement: number
     PE_per_round: number
+    paranormal_affinity?: string | null
 }
 
 

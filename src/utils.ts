@@ -13,6 +13,7 @@ export function formatEnum(value: unknown): string {
     if (!value) return ""
     const accentMap: Record<string, string> = {
         class_power: "Poder de Combatente",
+        paranormal: "Poder Paranormal",
         ciencia: "Ciência",
         investigacao: "Investigação",
         intuicao: "Intuição",

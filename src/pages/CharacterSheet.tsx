@@ -75,10 +75,36 @@ type PendingRitualOccultismTest = {
     dt: number
 }
 
+type PendingRitualHeal = {
+    ritualId?: number
+    ritualName: string
+    ritualVariant: "padrao" | "discente" | "verdadeiro"
+    formula: string
+    dt: number
+}
+
+type PendingHealRoll = {
+    sourceType: "ritual" | "item"
+    sourceName: string
+    formula: string
+    context?: Record<string, unknown>
+}
+
 type RealtimeDocumentMessage = {
     type: string
     document?: DocumentSummary
     annotation?: DocumentAnnotation
+    character?: {
+        id: number
+        healthy_points?: number
+        healthy_max?: number
+        sanity_points?: number
+        sanity_max?: number
+        effort_points?: number
+        effort_max?: number
+        investigation_points?: number
+        investigation_max?: number
+    }
 }
 
 type AnnotationComposerProps = {
@@ -97,6 +123,7 @@ type PendingSaberPoder =
         kind: "attribute"
         attribute: keyof typeof attributeKeyLabelMap
         value: number
+        options?: SkillTestOptions
     }
 
 type SkillTestOptions = {
@@ -335,7 +362,7 @@ const identificacaoParanormalExpertiseSet = new Set(["ocultismo"])
 
 const isTacticalWeapon = (weapon: WeaponSummary) => {
     const proficiency = normalizeText(weapon.proficiency_required ?? "")
-    const category = normalizeText(weapon.category ?? "")
+    const category = normalizeText(String(weapon.category ?? ""))
     return (
         proficiency === "armas_taticas"
         || proficiency.includes("tatic")
@@ -349,9 +376,24 @@ const isFirearmWeapon = (weapon: WeaponSummary) => {
     return type === "arma_de_fogo" || type === "arma de fogo"
 }
 
+const isParanormalAbilityType = (value?: string | null) => (
+    normalizeText(value ?? "").includes("paranormal")
+)
+
 const capitalizeFirst = (value: string) => (
     value ? value.charAt(0).toUpperCase() + value.slice(1) : value
 )
+
+const formatCategoryLabel = (value: number | null | undefined) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "-"
+    if (value === 0) return "0"
+    if (value === 1) return "I"
+    if (value === 2) return "II"
+    if (value === 3) return "III"
+    if (value === 4) return "IV"
+    if (value === 5) return "V"
+    return String(value)
+}
 
 const getInventoryTotalSpace = (character: CharacterDetails) => {
     const record = character as Record<string, unknown>
@@ -420,8 +462,9 @@ type EquipmentEntry = {
     id: string | number
     name: string
     space: number
-    category: string | undefined
+    category: number | undefined
     description: string | undefined
+    healFormula?: string | null
 }
 
 const getOriginName = (origin: CharacterDetails["origin"] | null | undefined) => {
@@ -501,6 +544,15 @@ const replaceNoneLabel = (value: string) => {
     return normalizeText(value) === "none" ? "Não possui" : value
 }
 
+const isOriginAbilityAssignment = (
+    ability: AbilitySummary,
+    originInfo?: OriginSummary | null
+) => {
+    if (ability.origin_id == null) return false
+    if (originInfo?.id == null) return true
+    return Number(ability.origin_id) === Number(originInfo.id)
+}
+
 const formatTimestamp = (value: string) => {
     if (!value) return ""
     try {
@@ -529,7 +581,15 @@ const getAvatarUrl = (avatar?: string | null) => {
 const isIntellectExpertise = (name: string) =>
     expertiseAttributeMap[normalizeText(name)] === "atrib_intellect"
 
-const getDefenseBonusFromItem = (name: string, category?: string) => {
+const isPresenceExpertise = (name: string) =>
+    expertiseAttributeMap[normalizeText(name)] === "atrib_presence"
+
+const isStrengthOrAgilityExpertise = (name: string) => {
+    const attribute = expertiseAttributeMap[normalizeText(name)]
+    return attribute === "atrib_strength" || attribute === "atrib_agility"
+}
+
+const getDefenseBonusFromItem = (name: string, category?: string | number) => {
     const haystack = normalizeText(`${name} ${category ?? ""}`)
     if (haystack.includes("protecao pesada") || haystack.includes("protecoes_pesadas")) {
         return 10
@@ -543,7 +603,7 @@ const getDefenseBonusFromItem = (name: string, category?: string) => {
 
 const ritualItemElements = ["conhecimento", "energia", "morte", "sangue", "medo"]
 
-const getRitualItemElement = (name: string, category?: string) => {
+const getRitualItemElement = (name: string, category?: string | number) => {
     const normalized = normalizeText(`${name} ${category ?? ""}`)
     const compact = normalized.replace(/[()]/g, "").replace(/[_-]/g, " ")
     for (const element of ritualItemElements) {
@@ -711,7 +771,7 @@ const weaponProficiencyOptions = [
 const weaponFormDefaults = {
     name: "",
     description: "",
-    category: "",
+    category: "0",
     damage_formula: "",
     threat_margin: "20",
     critical_multiplier: "2",
@@ -724,7 +784,7 @@ const weaponFormDefaults = {
 const itemFormDefaults = {
     name: "",
     description: "",
-    category: "",
+    category: "0",
     space: "1"
 }
 
@@ -1077,6 +1137,45 @@ const parseDamageFormula = (formula: string) => {
     return { diceCount, diceSides }
 }
 
+const normalizeHealFormula = (value: unknown) => {
+    if (typeof value !== "string") return null
+    const trimmed = value.trim()
+    return trimmed ? trimmed : null
+}
+
+const getHealFormula = (
+    record: Record<string, unknown>,
+    variant?: "padrao" | "discente" | "verdadeiro"
+) => {
+    const direct = normalizeHealFormula(
+        record["heal_formula"]
+        ?? record["healing_formula"]
+        ?? record["healFormula"]
+        ?? record["healingFormula"]
+    )
+    if (direct) return direct
+
+    if (variant) {
+        const variantKey = variant
+        const variantValue = normalizeHealFormula(
+            record[`heal_formula_${variantKey}`]
+            ?? record[`healing_formula_${variantKey}`]
+        )
+        if (variantValue) return variantValue
+
+        const variantObject =
+            record["heal_formula"]
+            ?? record["healing_formula"]
+        if (variantObject && typeof variantObject === "object") {
+            const obj = variantObject as Record<string, unknown>
+            const objValue = normalizeHealFormula(obj[variantKey])
+            if (objValue) return objValue
+        }
+    }
+
+    return null
+}
+
 export default function CharacterSheet() {
     const { id } = useParams<{ id: string }>()
     const navigate = useNavigate()
@@ -1112,6 +1211,13 @@ export default function CharacterSheet() {
     const [isLevelingUp, setIsLevelingUp] = useState(false)
     const [shouldOpenRitualAfterLevelUp, setShouldOpenRitualAfterLevelUp] = useState(false)
     const [pendingRitualOccultismTest, setPendingRitualOccultismTest] = useState<PendingRitualOccultismTest | null>(null)
+    const [pendingRitualHeal, setPendingRitualHeal] = useState<PendingRitualHeal | null>(null)
+    const [pendingHealRoll, setPendingHealRoll] = useState<PendingHealRoll | null>(null)
+    const [pendingVislumbres, setPendingVislumbres] = useState<{
+        dc: number
+    } | null>(null)
+    const [temporaryEffort, setTemporaryEffort] = useState(0)
+    const [isHealTargetOpen, setIsHealTargetOpen] = useState(false)
     const [originInfo, setOriginInfo] = useState<OriginSummary | null>(null)
     const [isOriginInfoOpen, setIsOriginInfoOpen] = useState(false)
     const [trailInfo, setTrailInfo] = useState<TrailInfo | null>(null)
@@ -1125,6 +1231,7 @@ export default function CharacterSheet() {
     const [isAbilityOptionsLoading, setIsAbilityOptionsLoading] = useState(false)
     const [isAddingAbility, setIsAddingAbility] = useState(false)
     const [abilityTab, setAbilityTab] = useState<"active" | "passive">("active")
+    const [abilityCatalogTab, setAbilityCatalogTab] = useState<"class" | "paranormal">("class")
     const [inventorySpace, setInventorySpace] = useState<InventorySpaceState | null>(null)
     const [isSpecialAttackModalOpen, setIsSpecialAttackModalOpen] = useState(false)
     const [specialAttackTarget, setSpecialAttackTarget] = useState<SpecialAttackTarget>("attack")
@@ -1140,6 +1247,9 @@ export default function CharacterSheet() {
     const [conhecimentoAplicadoActive, setConhecimentoAplicadoActive] = useState(false)
     const [ecleticoActive, setEcleticoActive] = useState(false)
     const [saberPoderActive, setSaberPoderActive] = useState(false)
+    const [magnumOpusActive, setMagnumOpusActive] = useState(false)
+    const [centoDezActive, setCentoDezActive] = useState(false)
+    const [processoOtimizadoActive, setProcessoOtimizadoActive] = useState(false)
     const [isSaberPoderPromptOpen, setIsSaberPoderPromptOpen] = useState(false)
     const [pendingSaberPoder, setPendingSaberPoder] = useState<PendingSaberPoder | null>(null)
     const [isQuickHandsPromptOpen, setIsQuickHandsPromptOpen] = useState(false)
@@ -1204,8 +1314,11 @@ export default function CharacterSheet() {
     const [isElementSpecialistOpen, setIsElementSpecialistOpen] = useState(false)
     const [elementMasterChoice, setElementMasterChoice] = useState<string | null>(null)
     const [isElementMasterOpen, setIsElementMasterOpen] = useState(false)
+    const [isParanormalAffinityOpen, setIsParanormalAffinityOpen] = useState(false)
     const [ritualPrediletoId, setRitualPrediletoId] = useState<number | null>(null)
     const [isRitualPrediletoOpen, setIsRitualPrediletoOpen] = useState(false)
+    const [favoriteToolsItemKey, setFavoriteToolsItemKey] = useState<string | null>(null)
+    const [isFavoriteToolsOpen, setIsFavoriteToolsOpen] = useState(false)
     const [ritualForm, setRitualForm] = useState(() => ({ ...ritualFormDefaults }))
     const [isCreatingRitual, setIsCreatingRitual] = useState(false)
     const [expandedRitualIds, setExpandedRitualIds] = useState<number[]>([])
@@ -1220,9 +1333,10 @@ export default function CharacterSheet() {
     const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false)
     const [annotationsError, setAnnotationsError] = useState<string | null>(null)
     const [isSendingAnnotation, setIsSendingAnnotation] = useState(false)
-    const [shareCharacters, setShareCharacters] = useState<Array<{ id: number; name: string }>>([])
+    const [shareCharacters, setShareCharacters] = useState<Array<{ id: number; name: string; user_id: number }>>([])
     const [sharingDocumentId, setSharingDocumentId] = useState<number | null>(null)
     const [shareTargetsByDocument, setShareTargetsByDocument] = useState<Record<number, number | "">>({})
+    const [unshareTargetsByDocument, setUnshareTargetsByDocument] = useState<Record<number, number | "">>({})
     const [characterDirectory, setCharacterDirectory] = useState<
         Record<number, { name: string; avatar?: string | null }>
     >({})
@@ -1332,13 +1446,29 @@ export default function CharacterSheet() {
         }
     }, [])
 
+    const sortDocuments = useCallback(
+        (list: DocumentSummary[]) =>
+            list.slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+        []
+    )
+
+    const updateDocumentsState = useCallback(
+        (document: DocumentSummary) => {
+            setDocuments((prev) => {
+                const filtered = prev.filter((entry) => entry.id !== document.id)
+                return sortDocuments([document, ...filtered])
+            })
+        },
+        [sortDocuments]
+    )
+
     const fetchCharacterDirectory = useCallback(async () => {
         const endpoint = user?.role === "player" ? "/characters/list/all" : "/characters/list"
         try {
             const response = await api.get(endpoint)
             const list = Array.isArray(response.data?.characters) ? response.data.characters : []
             const directory: Record<number, { name: string; avatar?: string | null }> = {}
-            const options: Array<{ id: number; name: string }> = []
+            const options: Array<{ id: number; name: string; user_id: number }> = []
             list.forEach((entry: Record<string, unknown>) => {
                 const userId = Number(entry.user_id)
                 if (!Number.isFinite(userId)) return
@@ -1352,7 +1482,8 @@ export default function CharacterSheet() {
                 if (Number.isFinite(charId)) {
                     options.push({
                         id: charId,
-                        name: typeof entry.name === "string" ? entry.name : `Personagem #${charId}`
+                        name: typeof entry.name === "string" ? entry.name : `Personagem #${charId}`,
+                        user_id: userId
                     })
                 }
             })
@@ -1361,7 +1492,7 @@ export default function CharacterSheet() {
         } catch (err) {
             console.error("Erro ao buscar personagens para anotações:", err)
         }
-    }, [user?.role])
+    }, [updateDocumentsState, user?.role])
 
     const handleSendAnnotation = useCallback(async (body: string) => {
         if (!previewDocument) return false
@@ -1388,32 +1519,70 @@ export default function CharacterSheet() {
         if (user?.role !== "player") return
         try {
             setSharingDocumentId(docId)
-            await api.post(`/documents/${docId}/share`, {
+            const response = await api.post(`/documents/${docId}/share`, {
                 share_with_all: true
             })
+            updateDocumentsState(response.data as DocumentSummary)
         } catch (err) {
             console.error("Erro ao compartilhar documento:", err)
             alert("Erro ao compartilhar documento.")
         } finally {
             setSharingDocumentId(null)
         }
-    }, [user?.role])
+    }, [updateDocumentsState, user?.role])
 
     const handleShareDocumentWithCharacter = useCallback(async (docId: number, characterId: number) => {
         if (user?.role !== "player") return
         try {
             setSharingDocumentId(docId)
-            await api.post(`/documents/${docId}/share`, {
+            const response = await api.post(`/documents/${docId}/share`, {
                 share_with_all: false,
                 character_id: characterId
             })
+            updateDocumentsState(response.data as DocumentSummary)
         } catch (err) {
             console.error("Erro ao compartilhar documento:", err)
             alert("Erro ao compartilhar documento.")
         } finally {
             setSharingDocumentId(null)
         }
+    }, [updateDocumentsState, user?.role])
+
+    const handleUnshareDocumentFromAll = useCallback(async (docId: number) => {
+        if (user?.role !== "player") return
+        try {
+            setSharingDocumentId(docId)
+            const response = await api.post(`/documents/${docId}/unshare`, {
+                unshare_from_all: true
+            })
+            updateDocumentsState(response.data as DocumentSummary)
+        } catch (err) {
+            console.error("Erro ao descompartilhar documento:", err)
+            alert("Erro ao descompartilhar documento.")
+        } finally {
+            setSharingDocumentId(null)
+        }
     }, [user?.role])
+
+    const handleUnshareDocumentFromCharacter = useCallback(
+        async (docId: number, characterId: number) => {
+            if (user?.role !== "player") return
+            try {
+                setSharingDocumentId(docId)
+                const response = await api.post(`/documents/${docId}/unshare`, {
+                    unshare_from_all: false,
+                    character_id: characterId
+                })
+                updateDocumentsState(response.data as DocumentSummary)
+            } catch (err) {
+                console.error("Erro ao descompartilhar documento:", err)
+                alert("Erro ao descompartilhar documento.")
+            } finally {
+                setSharingDocumentId(null)
+            }
+        },
+        [updateDocumentsState, user?.role]
+    )
 
     const fetchDocumentBlob = useCallback(async (doc: DocumentSummary) => {
         return api.get(`/documents/${doc.id}/file`, { responseType: "blob" })
@@ -1460,6 +1629,7 @@ export default function CharacterSheet() {
         setAnnotationsError(null)
         setShareCharacters([])
         setShareTargetsByDocument({})
+        setUnshareTargetsByDocument({})
         setSharingDocumentId(null)
         setCharacterDirectory({})
         setIsPreviewPanning(false)
@@ -1485,6 +1655,7 @@ export default function CharacterSheet() {
         setAnnotationsError(null)
         setShareCharacters([])
         setShareTargetsByDocument({})
+        setUnshareTargetsByDocument({})
         setSharingDocumentId(null)
         setCharacterDirectory({})
         setIsPreviewPanning(false)
@@ -1768,6 +1939,13 @@ export default function CharacterSheet() {
 
     useEffect(() => {
         if (!character) return
+        setTemporaryEffort(0)
+        setMagnumOpusActive(false)
+        setCentoDezActive(false)
+    }, [character?.id])
+
+    useEffect(() => {
+        if (!character) return
         const trailKey = normalizeText(reverseFormatEnum(character.trail ?? ""))
         if (!trailKey || trailKey === "none") {
             setTrailInfo(null)
@@ -1858,13 +2036,14 @@ export default function CharacterSheet() {
             }
         }
 
-        const sortDocuments = (list: DocumentSummary[]) =>
-            list.slice().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-
         const sortAnnotations = (list: DocumentAnnotation[]) =>
             list.slice().sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
         const applyDocumentUpdate = (document: DocumentSummary, eventType: string) => {
+            if (eventType === "document_unshared" || eventType === "document_unshared_all") {
+                void fetchDocuments()
+                return
+            }
             setDocuments((prev) => {
                 const filtered = prev.filter((entry) => entry.id !== document.id)
                 if (user.role === "master") {
@@ -1931,6 +2110,24 @@ export default function CharacterSheet() {
                 }
                 if (!data || typeof data.type !== "string") return
 
+                if (data.type === "character_updated" && data.character) {
+                    setCharacter((prev) => {
+                        if (!prev || prev.id !== data.character?.id) return prev
+                        return {
+                            ...prev,
+                            healthy_points: data.character.healthy_points ?? prev.healthy_points,
+                            healthy_max: data.character.healthy_max ?? prev.healthy_max,
+                            sanity_points: data.character.sanity_points ?? prev.sanity_points,
+                            sanity_max: data.character.sanity_max ?? prev.sanity_max,
+                            effort_points: data.character.effort_points ?? prev.effort_points,
+                            effort_max: data.character.effort_max ?? prev.effort_max,
+                            investigation_points: data.character.investigation_points ?? prev.investigation_points,
+                            investigation_max: data.character.investigation_max ?? prev.investigation_max
+                        }
+                    })
+                    return
+                }
+
                 if (data.type.startsWith("document_annotation_") && data.annotation) {
                     applyAnnotationUpdate(data.annotation, data.type)
                     return
@@ -1967,7 +2164,7 @@ export default function CharacterSheet() {
             }
             wsDocumentsRef.current = null
         }
-    }, [id, token, user])
+    }, [fetchDocuments, id, token, user])
 
     useEffect(() => {
         if (!character) return
@@ -2187,6 +2384,15 @@ export default function CharacterSheet() {
 
     useEffect(() => {
         if (!character) return
+        if (character.nex_total >= 50 && !character.paranormal_affinity) {
+            setIsParanormalAffinityOpen(true)
+        } else {
+            setIsParanormalAffinityOpen(false)
+        }
+    }, [character?.nex_total, character?.paranormal_affinity])
+
+    useEffect(() => {
+        if (!character) return
         const hasRitualPredileto = (character.abilities ?? []).some(
             (ability) => isRitualPrediletoName(ability.name)
         )
@@ -2204,6 +2410,28 @@ export default function CharacterSheet() {
         const exists = (character.rituals ?? []).some((ritual) => ritual.id === parsed)
         setRitualPrediletoId(exists ? parsed : null)
     }, [character, character?.abilities, character?.rituals])
+
+    useEffect(() => {
+        if (!character) return
+        const hasFavoriteTools = (character.abilities ?? []).some(
+            (ability) => normalizeText(ability.name) === "ferramentas favoritas"
+        )
+        if (!hasFavoriteTools) {
+            setFavoriteToolsItemKey(null)
+            return
+        }
+        const storageKey = `favorite_tools_${character.id}`
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) {
+            setFavoriteToolsItemKey(null)
+            return
+        }
+        const equipmentRaw = getEquipmentItems(character)
+        const allowedIds = equipmentRaw.map((item, index) =>
+            String(getEquipmentId(item, index))
+        )
+        setFavoriteToolsItemKey(allowedIds.includes(raw) ? raw : null)
+    }, [character, character?.abilities, character?.items])
 
     async function updateStatus(field: StatusField, newValue: number) {
         try {
@@ -2268,45 +2496,252 @@ export default function CharacterSheet() {
         })
     }, [character, updateStatusBatch])
 
+    const handleHealRoll = async ({
+        sourceType,
+        sourceName,
+        formula,
+        useAbilities,
+        context,
+        targetId,
+        targetName
+    }: {
+        sourceType: "ritual" | "item"
+        sourceName: string
+        formula: string
+        useAbilities?: string[]
+        context?: Record<string, unknown>
+        targetId?: number
+        targetName?: string
+    }) => {
+        if (!character) return
+        try {
+            const abilities = new Set(useAbilities ?? [])
+            const healContext: Record<string, unknown> = { ...(context ?? {}) }
+            if (hasTecnicaMedicinal) {
+                abilities.add("Técnica Medicinal")
+                const intellectBonus = Number(character.atrib_intellect) || 0
+                if (intellectBonus) {
+                    healContext.heal_bonus_intellect = intellectBonus
+                }
+            }
+
+            const response = await api.post("/actions/heal-roll", {
+                character_id: character.id,
+                target_id: targetId,
+                source_type: sourceType,
+                source_name: sourceName,
+                formula,
+                use_abilities: Array.from(abilities),
+                context: Object.keys(healContext).length > 0 ? healContext : undefined
+            })
+
+            const data = response.data ?? {}
+            if (typeof data.effort_points === "number") {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    return { ...prev, effort_points: data.effort_points }
+                })
+            }
+
+            const healRoll = data.heal_roll ?? data.roll ?? {}
+            const dice = Array.isArray(healRoll.dice)
+                ? healRoll.dice.filter((value: unknown): value is number => typeof value === "number")
+                : []
+            const bonus = Number(healRoll.bonus ?? 0)
+            const totalRaw = Number(healRoll.total ?? NaN)
+            let diceTotal = 0
+            for (const value of dice) {
+                diceTotal += value
+            }
+            const bonusValue = Number.isFinite(bonus) ? bonus : 0
+            const total =
+                Number.isFinite(totalRaw)
+                    ? totalRaw
+                    : diceTotal + bonusValue
+            const notes = Array.isArray(data.notes)
+                ? data.notes.filter((note: unknown): note is string => typeof note === "string")
+                : []
+            const targetSuffix = targetName ? ` (${targetName})` : ""
+
+            setWeaponRollResult({
+                title: `Cura - ${sourceName}${targetSuffix}`,
+                formula: String(healRoll.formula ?? formula),
+                dice,
+                total,
+                bonus: bonus || undefined,
+                bonusLabel: bonus ? "Bônus total" : undefined,
+                notes: notes.length > 0 ? notes : undefined
+            })
+            setIsWeaponRollOpen(true)
+
+            const isSelfTarget = !targetId || targetId === character.id
+            if (isSelfTarget && typeof data.healthy_points === "number") {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    return { ...prev, healthy_points: data.healthy_points }
+                })
+                return
+            }
+
+            const healAmount = Number(
+                data.heal_amount ?? data.healed ?? healRoll.heal_amount ?? total
+            )
+            if (isSelfTarget && Number.isFinite(healAmount) && healAmount !== 0) {
+                setCharacter((prev) => {
+                    if (!prev) return prev
+                    const newValue = clamp(
+                        prev.healthy_points + healAmount,
+                        0,
+                        prev.healthy_max
+                    )
+                    updateStatus("healthy_points", newValue)
+                    return {
+                        ...prev,
+                        healthy_points: newValue
+                    }
+                })
+            }
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao rolar cura")
+        }
+    }
+
+    const openHealTargetPicker = (pending: PendingHealRoll) => {
+        setPendingHealRoll(pending)
+        setIsHealTargetOpen(true)
+    }
+
+    const handleSelectHealTarget = (targetId: number, targetName: string) => {
+        if (!pendingHealRoll) return
+        void handleHealRoll({
+            ...pendingHealRoll,
+            targetId,
+            targetName
+        })
+        setIsHealTargetOpen(false)
+        setPendingHealRoll(null)
+    }
+
     useEffect(() => {
-        if (!pendingRitualOccultismTest || !rollResult) return
+        if (!rollResult) return
+        if (!pendingRitualOccultismTest && !pendingRitualHeal) return
         const normalizedExpertise = normalizeText(rollResult.expertise ?? "")
         if (normalizedExpertise !== "ocultismo") return
-        const { ritualName, ritualVariant, peCost, dt } = pendingRitualOccultismTest
         const total = rollResult.total ?? 0
-        const difference = total - dt
-        if (difference < 0) {
-            const mentalDamage = peCost
-            const permanentLoss = difference <= -5 ? 1 : 0
-            if (mentalDamage > 0 || permanentLoss > 0) {
-                applySanityChange(-mentalDamage, permanentLoss)
+        if (pendingRitualOccultismTest) {
+            const { ritualName, ritualVariant, peCost, dt } = pendingRitualOccultismTest
+            const difference = total - dt
+            if (difference < 0) {
+                const mentalDamage = peCost
+                const permanentLoss = difference <= -5 ? 1 : 0
+                if (mentalDamage > 0 || permanentLoss > 0) {
+                    applySanityChange(-mentalDamage, permanentLoss)
+                }
+                const variantLabel =
+                    ritualVariant === "discente"
+                        ? "Discente"
+                        : ritualVariant === "verdadeiro"
+                            ? "Verdadeiro"
+                            : "Padrão"
+                const message = [
+                    `${ritualName} (${variantLabel}) falhou.`,
+                    mentalDamage > 0 ? `Dano mental: ${mentalDamage}.` : null,
+                    permanentLoss > 0 ? "Perdeu 1 Sanidade permanente." : null
+                ].filter(Boolean).join(" ")
+                if (message) {
+                    setRitualOutcomeToast(message)
+                }
             }
-            const variantLabel =
-                ritualVariant === "discente"
-                    ? "Discente"
-                    : ritualVariant === "verdadeiro"
-                        ? "Verdadeiro"
-                        : "Padrão"
-            const message = [
-                `${ritualName} (${variantLabel}) falhou.`,
-                mentalDamage > 0 ? `Dano mental: ${mentalDamage}.` : null,
-                permanentLoss > 0 ? "Perdeu 1 Sanidade permanente." : null
-            ].filter(Boolean).join(" ")
-            if (message) {
-                setRitualOutcomeToast(message)
+            setPendingRitualOccultismTest(null)
+        }
+
+        if (pendingRitualHeal) {
+            if (total >= pendingRitualHeal.dt) {
+                void handleHealRoll({
+                    sourceType: "ritual",
+                    sourceName: pendingRitualHeal.ritualName,
+                    formula: pendingRitualHeal.formula,
+                    context: {
+                        ritual_id: pendingRitualHeal.ritualId,
+                        ritual_variant: pendingRitualHeal.ritualVariant
+                    }
+                })
+            }
+            setPendingRitualHeal(null)
+        }
+    }, [pendingRitualOccultismTest, pendingRitualHeal, rollResult, applySanityChange])
+
+    useEffect(() => {
+        if (!pendingVislumbres || !rollResult) return
+        const label = normalizeText(rollResult.success_label ?? "")
+        if (!label.includes("vislumbres do passado")) return
+
+        const dc = pendingVislumbres.dc
+        const total = Number(rollResult.total ?? 0)
+        setPendingVislumbres(null)
+
+        if (total < dc) {
+            setOpportunityToast("Vislumbres do Passado falhou.")
+            return
+        }
+
+        const applyReward = async () => {
+            try {
+                const response = await api.post("/actions/roll-dice", {
+                    dice_count: 1,
+                    dice_sides: 4
+                })
+                const dice = Array.isArray(response.data?.dice)
+                    ? response.data.dice.filter((value: unknown): value is number => typeof value === "number")
+                    : []
+                let gained = 0
+                for (const value of dice) {
+                    gained += value
+                }
+                if (!Number.isFinite(gained) || gained <= 0) {
+                    setOpportunityToast("Vislumbres do Passado: nenhum PE ganho.")
+                    return
+                }
+                setTemporaryEffort((prev) => Math.max(0, prev + gained))
+                setOpportunityToast(`Vislumbres do Passado: +${gained} PE temporários.`)
+            } catch (err) {
+                console.error(err)
+                alert("Erro ao rolar Vislumbres do Passado.")
             }
         }
-        setPendingRitualOccultismTest(null)
-    }, [pendingRitualOccultismTest, rollResult, applySanityChange])
+
+        void applyReward()
+    }, [pendingVislumbres, rollResult])
 
     const handleStatusChange = (field: StatusField, maxField: StatusMaxField, delta: number) => {
         setCharacter(prev => {
             if (!prev) return prev
 
+            if (field === "effort_points" && delta < 0 && temporaryEffort > 0) {
+                const spend = Math.abs(delta)
+                const tempUsed = Math.min(temporaryEffort, spend)
+                if (tempUsed > 0) {
+                    setTemporaryEffort((prevTemp) => Math.max(0, prevTemp - tempUsed))
+                }
+                const remaining = spend - tempUsed
+                if (remaining <= 0) {
+                    return prev
+                }
+                const newValue = clamp(prev[field] - remaining, 0, prev[maxField])
+                if (newValue !== prev[field]) {
+                    updateStatus(field, newValue)
+                }
+                return {
+                    ...prev,
+                    [field]: newValue
+                }
+            }
+
             const newValue = clamp(prev[field] + delta, 0, prev[maxField])
-
-            updateStatus(field, newValue)
-
+            if (newValue !== prev[field]) {
+                updateStatus(field, newValue)
+            }
             return {
                 ...prev,
                 [field]: newValue
@@ -2634,6 +3069,7 @@ export default function CharacterSheet() {
         setIsRolling(true)
         setRollResult(null)
         const normalizedSkill = normalizeText(expertiseName)
+        const isPresenceSkill = isPresenceExpertise(normalizedSkill)
         const shouldPromptTrilhaCerta =
             hasNaTrilhaCerta && trilhaCertaExpertiseSet.has(normalizedSkill)
         setIsTrilhaCertaPromptOpen(shouldPromptTrilhaCerta || trilhaCertaBonusDice > 0)
@@ -2642,6 +3078,11 @@ export default function CharacterSheet() {
             const useAbilities = new Set(options?.useAbilities ?? [])
             const context = { ...(options?.context ?? {}) }
             const trainedValue = expertise?.[expertiseName]?.treino ?? 0
+            const shouldApplyMagnum = magnumOpusActive && isPresenceSkill
+            const shouldApplyProcessoOtimizado = processoOtimizadoActive
+            if (shouldApplyMagnum) {
+                context.recognized_target = true
+            }
 
             const shouldApplyConhecimento =
                 conhecimentoAplicadoActive
@@ -2651,9 +3092,39 @@ export default function CharacterSheet() {
                 useAbilities.add("Conhecimento Aplicado")
             }
 
+            const shouldApplyCentoDez =
+                centoDezActive
+                && isStrengthOrAgilityExpertise(normalizedSkill)
+                && normalizedSkill !== "luta"
+                && normalizedSkill !== "pontaria"
+                && !shouldApplyConhecimento
+
             const shouldApplyEcletico = ecleticoActive && trainedValue <= 0
             if (shouldApplyEcletico) {
                 useAbilities.add("Eclético")
+            }
+
+            if (shouldApplyCentoDez) {
+                useAbilities.add("110%")
+                const prepaid =
+                    Array.isArray(context.prepaid_abilities)
+                        ? context.prepaid_abilities.filter(
+                            (name: unknown): name is string => typeof name === "string"
+                        )
+                        : []
+                context.prepaid_abilities = Array.from(new Set([...prepaid, "110%"]))
+            }
+            if (shouldApplyProcessoOtimizado) {
+                useAbilities.add("Processo Otimizado")
+                const prepaid =
+                    Array.isArray(context.prepaid_abilities)
+                        ? context.prepaid_abilities.filter(
+                            (name: unknown): name is string => typeof name === "string"
+                        )
+                        : []
+                context.prepaid_abilities = Array.from(
+                    new Set([...prepaid, "Processo Otimizado"])
+                )
             }
 
             const peritoEligible =
@@ -2672,6 +3143,16 @@ export default function CharacterSheet() {
 
             if (sentidoTaticoActive && resistanceExpertiseSet.has(normalizedSkill)) {
                 context.sentido_tatico_active = true
+            }
+
+            const isHealingRoll = Boolean(
+                context.is_healing
+                || context.healing_roll
+                || context.healing
+            )
+            if (hasTecnicaMedicinal && normalizedSkill === "medicina" && isHealingRoll) {
+                useAbilities.add("Técnica Medicinal")
+                context.heal_bonus_intellect = Number(character?.atrib_intellect) || 0
             }
 
             if (hasMaosRapidas && normalizedSkill === "crime") {
@@ -2701,6 +3182,18 @@ export default function CharacterSheet() {
                     return { ...prev, effort_points: data.effort_points }
                 })
             }
+            const appliedAbilities = Array.isArray(data.applied_abilities)
+                ? data.applied_abilities.filter((name: unknown): name is string => typeof name === "string")
+                : []
+            const appliedMagnumOpus = appliedAbilities.some(
+                (name: string) => normalizeText(name) === "magnum opus"
+            )
+            const appliedCentoDez = appliedAbilities.some(
+                (name: string) => normalizeText(name) === "110%"
+            )
+            const appliedProcessoOtimizado = appliedAbilities.some(
+                (name: string) => normalizeText(name) === "processo otimizado"
+            )
 
             const dice = Array.isArray(data.dice)
                 ? data.dice.filter((value: unknown): value is number => typeof value === "number")
@@ -2728,6 +3221,15 @@ export default function CharacterSheet() {
                 perito_bonus_dice: data.perito_bonus_dice || undefined
             }
 
+            if (shouldApplyProcessoOtimizado && !appliedProcessoOtimizado) {
+                rollResult.bonus += 5
+                rollResult.total += 5
+                rollResult.extra_bonus = (rollResult.extra_bonus ?? 0) + 5
+                rollResult.extra_label = rollResult.extra_label
+                    ? `${rollResult.extra_label} + Processo Otimizado`
+                    : "Processo Otimizado"
+            }
+
             setRollResult(rollResult)
 
             if (shouldApplyEcletico) {
@@ -2741,6 +3243,15 @@ export default function CharacterSheet() {
             }
             if (trilhaCertaBonusDice > 0) {
                 setTrilhaCertaBonusDice(0)
+            }
+            if (appliedMagnumOpus) {
+                setMagnumOpusActive(false)
+            }
+            if (appliedCentoDez) {
+                setCentoDezActive(false)
+            }
+            if (processoOtimizadoActive) {
+                setProcessoOtimizadoActive(false)
             }
         } catch (err) {
             console.error(err)
@@ -2858,7 +3369,15 @@ export default function CharacterSheet() {
             const appliedSaberPoder = appliedAbilities.some(
                 (name: string) => normalizeText(name) === "saber e poder"
             )
+            const appliedMagnumOpus = appliedAbilities.some(
+                (name: string) => normalizeText(name) === "magnum opus"
+            )
             const bonusValue = Number(data.bonus ?? 0)
+            const appliedProcessoOtimizado = appliedAbilities.some(
+                (name: string) => normalizeText(name) === "processo otimizado"
+            )
+            const shouldApplyProcessoOtimizado = processoOtimizadoActive && !appliedProcessoOtimizado
+            const processoBonus = shouldApplyProcessoOtimizado ? 5 : 0
 
             setIsTrilhaCertaPromptOpen(false)
             setRollResult({
@@ -2869,14 +3388,29 @@ export default function CharacterSheet() {
                 dice,
                 treino: 0,
                 extra: 0,
-                bonus: bonusValue,
-                total: Number(data.total ?? 0),
+                bonus: bonusValue + processoBonus,
+                total: Number(data.total ?? 0) + processoBonus,
                 roll_mode: data.roll_mode,
                 success_min: options?.successMin,
                 success_label: options?.successLabel,
-                extra_bonus: appliedSaberPoder && bonusValue ? bonusValue : undefined,
-                extra_label: appliedSaberPoder ? "Saber é Poder" : undefined
+                extra_bonus: (() => {
+                    const saberBonus = appliedSaberPoder && bonusValue ? bonusValue : 0
+                    const extraTotal = saberBonus + (shouldApplyProcessoOtimizado ? 5 : 0)
+                    return extraTotal > 0 ? extraTotal : undefined
+                })(),
+                extra_label: (() => {
+                    const labels: string[] = []
+                    if (appliedSaberPoder) labels.push("Saber é Poder")
+                    if (shouldApplyProcessoOtimizado) labels.push("Processo Otimizado")
+                    return labels.length > 0 ? labels.join(" + ") : undefined
+                })()
             })
+            if (appliedMagnumOpus) {
+                setMagnumOpusActive(false)
+            }
+            if (processoOtimizadoActive) {
+                setProcessoOtimizadoActive(false)
+            }
         } catch (err) {
             console.error(err)
             alert("Erro ao rolar atributo")
@@ -2885,7 +3419,18 @@ export default function CharacterSheet() {
         }
     }
 
-    const handleRollAttribute = async (attribute: keyof typeof attributeKeyLabelMap, value: number) => {
+    const handleRollAttribute = async (
+        attribute: keyof typeof attributeKeyLabelMap,
+        value: number,
+        options?: SkillTestOptions
+    ) => {
+        const nextOptions =
+            magnumOpusActive && attribute === "presence"
+                ? mergeSkillTestOptions(options, {
+                    context: { recognized_target: true }
+                })
+                : options
+
         if (attribute === "intellect") {
             if (saberPoderActive) {
                 if (saberPoderCost > currentEffort) {
@@ -2893,22 +3438,24 @@ export default function CharacterSheet() {
                     return
                 }
                 setSaberPoderActive(false)
-                await performAttributeRoll(attribute, {
+                const saberOptions = mergeSkillTestOptions(nextOptions, {
                     useAbilities: ["Saber é Poder"]
                 })
+                await performAttributeRoll(attribute, saberOptions)
                 return
             }
             if (hasSaberPoder && currentEffort >= saberPoderCost) {
                 setPendingSaberPoder({
                     kind: "attribute",
                     attribute,
-                    value
+                    value,
+                    options: nextOptions
                 })
                 setIsSaberPoderPromptOpen(true)
                 return
             }
         }
-        await performAttributeRoll(attribute)
+        await performAttributeRoll(attribute, nextOptions)
     }
 
     const handleWeaponTestRoll = async (weapon: WeaponSummary) => {
@@ -2964,6 +3511,12 @@ export default function CharacterSheet() {
                 })
             }
 
+            const appliedAbilities = Array.isArray(data.applied_abilities)
+                ? data.applied_abilities.filter((name: unknown): name is string => typeof name === "string")
+                : []
+            const appliedProcessoOtimizado = appliedAbilities.some(
+                (name: string) => normalizeText(name) === "processo otimizado"
+            )
             const attackRoll = data.attack_roll ?? {}
             const dice = Array.isArray(attackRoll.dice)
                 ? attackRoll.dice.filter((value: unknown): value is number => typeof value === "number")
@@ -2972,6 +3525,9 @@ export default function CharacterSheet() {
             const attributeLabel = attributeKey
                 ? (attributeLabelMap[attributeKey] ?? formatEnum(attributeKey))
                 : ""
+            const shouldApplyProcessoOtimizado =
+                processoOtimizadoActive && !appliedProcessoOtimizado
+            const processoBonus = shouldApplyProcessoOtimizado ? 5 : 0
             setRollResult({
                 expertise: expertiseLabelMap[skill] ?? formatEnum(skill),
                 attribute: attributeLabel,
@@ -2980,13 +3536,18 @@ export default function CharacterSheet() {
                 dice,
                 treino: Number(attackRoll.treino ?? 0),
                 extra: Number(attackRoll.extra ?? 0),
-                bonus: Number(attackRoll.bonus ?? 0),
-                total: Number(attackRoll.total ?? 0),
-                roll_mode: attackRoll.roll_mode
+                bonus: Number(attackRoll.bonus ?? 0) + processoBonus,
+                total: Number(attackRoll.total ?? 0) + processoBonus,
+                roll_mode: attackRoll.roll_mode,
+                extra_bonus: processoBonus > 0 ? processoBonus : undefined,
+                extra_label: processoBonus > 0 ? "Processo Otimizado" : undefined
             })
 
             if (pending) {
                 setPendingSpecialAttack(null)
+            }
+            if (shouldApplyProcessoOtimizado) {
+                setProcessoOtimizadoActive(false)
             }
         } catch (err) {
             console.error(err)
@@ -3196,7 +3757,7 @@ export default function CharacterSheet() {
         setWeaponForm({
             name: weapon.name ?? "",
             description: weapon.description ?? "",
-            category: weapon.category ?? "",
+            category: String(weapon.category ?? ""),
             damage_formula: weapon.damage_formula ?? "",
             threat_margin: String(weapon.threat_margin ?? 20),
             critical_multiplier: String(weapon.critical_multiplier ?? 2),
@@ -3214,7 +3775,7 @@ export default function CharacterSheet() {
         setItemForm({
             name: item.name ?? "",
             description: item.description ?? "",
-            category: item.category ?? "",
+            category: String(item.category ?? ""),
             space: String(item.space ?? 1)
         })
         setItemPickerMode("edit")
@@ -3266,6 +3827,11 @@ export default function CharacterSheet() {
                     setIsRitualPrediletoOpen(true)
                 }
             }
+            if (normalizeText(ability.name) === "ferramentas favoritas") {
+                if (!favoriteToolsItemKey) {
+                    setIsFavoriteToolsOpen(true)
+                }
+            }
         } catch (err) {
             console.error(err)
             alert("Erro ao adicionar habilidade")
@@ -3282,7 +3848,7 @@ export default function CharacterSheet() {
             const payload = {
                 name: weaponForm.name.trim(),
                 description: weaponForm.description.trim(),
-                category: weaponForm.category.trim(),
+                category: toNumber(weaponForm.category, 0),
                 damage_formula: weaponForm.damage_formula.trim(),
                 threat_margin: Number(weaponForm.threat_margin),
                 critical_multiplier: Number(weaponForm.critical_multiplier),
@@ -3329,7 +3895,7 @@ export default function CharacterSheet() {
             const payload = {
                 name: weaponForm.name.trim(),
                 description: weaponForm.description.trim(),
-                category: weaponForm.category.trim(),
+                category: toNumber(weaponForm.category, 0),
                 damage_formula: weaponForm.damage_formula.trim(),
                 threat_margin: Number(weaponForm.threat_margin),
                 critical_multiplier: Number(weaponForm.critical_multiplier),
@@ -3384,7 +3950,7 @@ export default function CharacterSheet() {
             const payload = {
                 name: itemForm.name.trim(),
                 description: itemForm.description.trim(),
-                category: itemForm.category.trim(),
+                category: toNumber(itemForm.category, 0),
                 space: Number(itemForm.space)
             }
 
@@ -3432,7 +3998,7 @@ export default function CharacterSheet() {
             const payload = {
                 name: itemForm.name.trim(),
                 description: itemForm.description.trim(),
-                category: itemForm.category.trim(),
+                category: toNumber(itemForm.category, 0),
                 space: Number(itemForm.space)
             }
             const response = await api.patch(`/items/${itemToEdit.id}`, payload)
@@ -3790,7 +4356,7 @@ export default function CharacterSheet() {
 
     const handleRemoveAbility = async (ability: AbilitySummary) => {
         if (!character) return
-        if (originInfo?.id != null && ability.origin_id === originInfo.id) {
+        if (isOriginAbilityAssignment(ability, originInfo)) {
             alert("Não é possível remover a habilidade de origem.")
             return
         }
@@ -3843,6 +4409,9 @@ export default function CharacterSheet() {
                 setIsSaberPoderPromptOpen(false)
                 setSaberPoderActive(false)
             }
+            if (normalizeText(ability.name) === "processo otimizado") {
+                setProcessoOtimizadoActive(false)
+            }
             if (normalizeText(ability.name) === "na trilha certa") {
                 setTrilhaCertaBonusDice(0)
                 setIsTrilhaCertaPromptOpen(false)
@@ -3875,6 +4444,11 @@ export default function CharacterSheet() {
                 setRitualPrediletoId(null)
                 setIsRitualPrediletoOpen(false)
                 localStorage.removeItem(ritualPrediletoStorageKey)
+            }
+            if (normalizeText(ability.name) === "ferramentas favoritas") {
+                setFavoriteToolsItemKey(null)
+                setIsFavoriteToolsOpen(false)
+                localStorage.removeItem(favoriteToolsStorageKey)
             }
         } catch (err) {
             console.error(err)
@@ -4103,7 +4677,7 @@ export default function CharacterSheet() {
         id: UNARMED_WEAPON_ID,
         name: "Desarmado",
         description: "Ataque desarmado.",
-        category: "desarmado",
+        category: 0,
         damage_formula: "1d4",
         threat_margin: 20,
         critical_multiplier: 2,
@@ -4113,24 +4687,39 @@ export default function CharacterSheet() {
     }
     const weapons = [unarmedWeapon, ...baseWeapons]
     const equipmentItems = getEquipmentItems(character)
-    const equipmentEntries = equipmentItems
-        .map((item, index) => {
+    const equipmentEntries: EquipmentEntry[] = equipmentItems
+        .map((item, index): EquipmentEntry | null => {
             const name = getEquipmentLabel(item)
             if (!name) return null
             const record = item && typeof item === "object"
                 ? (item as Record<string, unknown>)
                 : null
-            const category = record && typeof record.category === "string" ? record.category : undefined
+            const category = record
+                ? (typeof record.category === "number"
+                    ? record.category
+                    : (typeof record.category === "string" && record.category.trim() !== ""
+                        ? (Number.isFinite(Number(record.category)) ? Number(record.category) : undefined)
+                        : undefined))
+                : undefined
             const description = record && typeof record.description === "string" ? record.description : undefined
+            const healFormula = record ? getHealFormula(record) : null
             return {
                 id: getEquipmentId(item, index),
                 name,
                 space: getEquipmentSpace(item),
                 category,
-                description
+                description,
+                healFormula
             }
         })
         .filter((entry): entry is EquipmentEntry => entry !== null)
+    const favoriteToolsItem =
+        favoriteToolsItemKey
+            ? equipmentEntries.find((item) => String(item.id) === favoriteToolsItemKey) ?? null
+            : null
+    const favoriteToolsOptions = equipmentEntries
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
     const defenseItemBonus = equipmentEntries.reduce(
         (sum, item) => sum + getDefenseBonusFromItem(item.name, item.category),
         0
@@ -4222,9 +4811,22 @@ export default function CharacterSheet() {
     const hasTatuagemRitualistica = abilities.some(
         (ability) => isTatuagemRitualisticaName(ability.name)
     )
+    const hasTecnicaMedicinal = abilities.some(
+        (ability) => normalizeText(ability.name) === "tecnica medicinal"
+    )
     const hasSaberPoder = abilities.some(
         (ability) => normalizeText(ability.name) === "saber e poder"
     )
+    const hasCalejado = abilities.some(
+        (ability) => normalizeText(ability.name) === "calejado"
+    )
+    const calejadoBonus = hasCalejado
+        ? Math.floor(Math.max(0, character.nex_total) / 5)
+        : 0
+    const calejadoNote =
+        hasCalejado && calejadoBonus > 0
+            ? `Calejado: +${calejadoBonus} PV (NEX ${character.nex_total}%)`
+            : null
     const ritualCasterAbility = abilities.find(isRitualCasterAbility)
     const ritualCasterEffect = parseRitualCasterEffect(ritualCasterAbility?.effect ?? null)
     const hasRitualCaster = Boolean(ritualCasterEffect)
@@ -4301,6 +4903,7 @@ export default function CharacterSheet() {
     const elementSpecialistStorageKey = `element_specialist_${character.id}`
     const elementMasterStorageKey = `element_master_${character.id}`
     const ritualPrediletoStorageKey = `ritual_predileto_${character.id}`
+    const favoriteToolsStorageKey = `favorite_tools_${character.id}`
 
     const getAbilityRequirementIssues = (ability: AbilitySummary) => {
         const rawRequirements = ability.requirements as unknown
@@ -4336,6 +4939,21 @@ export default function CharacterSheet() {
                 const requiredValue = typeof requirement.value === "number" ? requirement.value : 0
                 if (character.nex_total < requiredValue) {
                     issues.push(`NEX Total ${character.nex_total}/${requiredValue}`)
+                }
+                return
+            }
+
+            if (type === "paranormal_affinity") {
+                const requiredElement = typeof requirement.value === "string" ? requirement.value : ""
+                if (!requiredElement) {
+                    issues.push("Afinidade paranormal")
+                    return
+                }
+                if (
+                    !character.paranormal_affinity
+                    || normalizeText(character.paranormal_affinity) !== normalizeText(requiredElement)
+                ) {
+                    issues.push(`Afinidade ${formatEnum(requiredElement)}`)
                 }
                 return
             }
@@ -4377,11 +4995,24 @@ export default function CharacterSheet() {
         return issues
     }
     const availableAbilities = abilityOptions
-        .filter((ability) => ability.origin_id == null)
-        .filter((ability) => ability.ability_type !== "trail_power")
+        .filter((ability) => {
+            const abilityType = normalizeText(ability.ability_type ?? "")
+            if (abilityType === "trail_power") return false
+            const isParanormalAbility = isParanormalAbilityType(ability.ability_type)
+            if (abilityCatalogTab === "paranormal") {
+                return isParanormalAbility
+            }
+            return !isParanormalAbility
+        })
         .filter((ability) => getRequirementValue(ability.requirements, "trail") == null)
         .filter((ability) => !assignedAbilityIds.has(ability.id))
         .filter((ability) => {
+            if (abilityCatalogTab === "paranormal") {
+                return true
+            }
+            if (ability.origin_id != null) {
+                return true
+            }
             if (!ability.class_name) return false
             return normalizeText(ability.class_name) === normalizeText(characterClassKey)
         })
@@ -4439,7 +5070,11 @@ export default function CharacterSheet() {
             !ability.is_active && normalizeText(ability.name) !== "golpe demolidor"
     )
     const selectedAbilityRequirements = selectedAbility?.requirements ?? []
-    const currentEffort = character.effort_points
+    const currentEffort = character.effort_points + temporaryEffort
+    const statusCharacter =
+        temporaryEffort > 0
+            ? { ...character, effort_points: character.effort_points + temporaryEffort }
+            : character
     const selectedAbilityRequirementsText =
         selectedAbilityRequirements.length > 0
             ? toAbilityJson(selectedAbilityRequirements)
@@ -4459,6 +5094,8 @@ export default function CharacterSheet() {
     const pensamentoAgilCost = 2
     const camuflarOcultismoCost = 2
     const guiadoParanormalCost = 2
+    const centoDezCost = 2
+    const processoOtimizadoCost = 2
     const trilhaCertaBaseCost = 1
     const triggerHoldBaseCost = 2
     const sentidoTaticoCost = 2
@@ -4496,6 +5133,15 @@ export default function CharacterSheet() {
         && triggerHoldUses < triggerHoldMaxUses
         && currentEffort >= triggerHoldNextCost
         && (pePerRoundLimit <= 0 || triggerHoldNextTotal <= pePerRoundLimit)
+
+    const healTargetOptions = character
+        ? [
+            { id: character.id, name: character.name, isSelf: true },
+            ...shareCharacters
+                .filter((entry) => entry.id !== character.id)
+                .map((entry) => ({ id: entry.id, name: entry.name, isSelf: false }))
+        ]
+        : []
 
     const openSpecialAttackModal = () => {
         const affordableOptions = availableSpecialAttackOptions.filter(
@@ -4605,6 +5251,42 @@ export default function CharacterSheet() {
         setSaberPoderActive(false)
     }
 
+    const handleActivateMagnumOpus = () => {
+        if (magnumOpusActive) return
+        setMagnumOpusActive(true)
+    }
+
+    const handleCancelMagnumOpus = () => {
+        if (!magnumOpusActive) return
+        setMagnumOpusActive(false)
+    }
+
+    const handleActivateCentoDez = () => {
+        if (centoDezActive) return
+        if (centoDezCost > currentEffort) {
+            alert("PE insuficiente para 110%.")
+            return
+        }
+        handleStatusChange("effort_points", "effort_max", -centoDezCost)
+        setCentoDezActive(true)
+    }
+
+    const handleCancelCentoDez = () => {
+        if (!centoDezActive) return
+        setCentoDezActive(false)
+    }
+
+    const handleActivateProcessoOtimizado = () => {
+        if (processoOtimizadoActive) return
+        if (processoOtimizadoCost > currentEffort) {
+            alert("PE insuficiente para Processo Otimizado.")
+            return
+        }
+        handleStatusChange("effort_points", "effort_max", -processoOtimizadoCost)
+        setProcessoOtimizadoActive(true)
+        setOpportunityToast("Processo Otimizado ativo, gasto 2 PE")
+    }
+
     const handleActivateDemolishingStrike = () => {
         if (pendingDemolishingStrike) return
         if (demolishingStrikeCost > currentEffort) {
@@ -4700,6 +5382,17 @@ export default function CharacterSheet() {
         })
     }
 
+    const handleUseVislumbresDoPassado = async () => {
+        if (!character) return
+        const label = "Vislumbres do Passado (DT 10)"
+        setPendingVislumbres({ dc: 10 })
+        const intellectValue = toFiniteNumber(character.atrib_intellect) ?? 0
+        await handleRollAttribute("intellect", intellectValue, {
+            successMin: 10,
+            successLabel: label
+        })
+    }
+
     const handleActivateTrilhaCerta = async () => {
         if (!character) return false
         const nextCost = trilhaCertaBaseCost + trilhaCertaBonusDice
@@ -4780,8 +5473,10 @@ export default function CharacterSheet() {
 
         if (pending.kind === "attribute") {
             const nextOptions = applyBonus
-                ? { useAbilities: ["Saber é Poder"] }
-                : undefined
+                ? mergeSkillTestOptions(pending.options, {
+                    useAbilities: ["Saber é Poder"]
+                })
+                : pending.options
             performAttributeRoll(pending.attribute, nextOptions)
             return
         }
@@ -4882,11 +5577,53 @@ export default function CharacterSheet() {
         setIsElementMasterOpen(false)
     }
 
+    const handleSelectParanormalAffinity = async (value: string) => {
+        if (!character) return
+        const normalized = normalizeText(value)
+        const option = elementSpecialistOptions.find(
+            (item) => normalizeText(item.value) === normalized
+        )
+        if (!option) return
+        try {
+            const response = await api.patch(
+                `/characters/${character.id}/`,
+                { paranormal_affinity: option.value },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+            const updatedCharacter = response.data ?? {}
+            setCharacter((prev) => {
+                if (!prev) return prev
+                return {
+                    ...prev,
+                    ...updatedCharacter,
+                    paranormal_affinity: option.value
+                }
+            })
+            setIsParanormalAffinityOpen(false)
+        } catch (err) {
+            console.error(err)
+            alert("Erro ao atualizar afinidade paranormal.")
+        }
+    }
+
     const handleSelectRitualPredileto = (ritualId: number) => {
         if (!Number.isFinite(ritualId)) return
         setRitualPrediletoId(ritualId)
         localStorage.setItem(ritualPrediletoStorageKey, String(ritualId))
         setIsRitualPrediletoOpen(false)
+    }
+
+    const handleSelectFavoriteTool = (itemId: string | number) => {
+        const key = String(itemId)
+        setFavoriteToolsItemKey(key)
+        localStorage.setItem(favoriteToolsStorageKey, key)
+        setIsFavoriteToolsOpen(false)
+    }
+
+    const handleClearFavoriteTool = () => {
+        setFavoriteToolsItemKey(null)
+        localStorage.removeItem(favoriteToolsStorageKey)
+        setIsFavoriteToolsOpen(false)
     }
 
     const openPeritoConfig = () => {
@@ -4994,6 +5731,17 @@ export default function CharacterSheet() {
             peCost: cost,
             dt
         })
+        setPendingRitualHeal(null)
+        const ritualHealFormula = getHealFormula(ritual as Record<string, unknown>, variant)
+        if (ritualHealFormula) {
+            setPendingRitualHeal({
+                ritualId: ritual.id,
+                ritualName: ritual.name,
+                ritualVariant: variant,
+                formula: ritualHealFormula,
+                dt
+            })
+        }
         requestRollExpertise(
             "ocultismo",
             {
@@ -5056,8 +5804,7 @@ export default function CharacterSheet() {
         Boolean(specialAttackOption) && currentEffort >= (specialAttackOption?.peCost ?? 0)
 
     const renderAbilityItem = (ability: AbilitySummary) => {
-        const isOriginAbility =
-            originInfo?.id != null && ability.origin_id === originInfo.id
+        const isOriginAbility = isOriginAbilityAssignment(ability, originInfo)
         const isSpecialAttack = specialAttackAbility?.id === ability.id
         const isOpportunityAttack = normalizeText(ability.name) === "ataque de oportunidade"
         const isDefensiveCombat = normalizeText(ability.name) === "combate defensivo"
@@ -5076,12 +5823,25 @@ export default function CharacterSheet() {
         const isConhecimentoAplicado = normalizeText(ability.name) === "conhecimento aplicado"
         const isEcletico = normalizeText(ability.name) === "ecletico"
         const isSaberPoder = normalizeText(ability.name) === "saber e poder"
+        const isMagnumOpus = normalizeText(ability.name) === "magnum opus"
+        const isCentoDez = ["110%", "110"].includes(normalizeText(ability.name))
+        const isVislumbresDoPassado = normalizeText(ability.name) === "vislumbres do passado"
         const isSuppressiveFire = normalizeText(ability.name) === "tiro de cobertura"
         const isCamuflarOcultismo = normalizeText(ability.name) === "camuflar ocultismo"
         const isGuiadoParanormal = normalizeText(ability.name) === "guiado pelo paranormal"
+        const isProcessoOtimizado = normalizeText(ability.name) === "processo otimizado"
+        const isFavoriteTools = normalizeText(ability.name) === "ferramentas favoritas"
         const isElementSpecialist = normalizeText(ability.name) === "especialista em elemento"
         const isElementMaster = isMestreEmElementoName(ability.name)
         const isRitualPredileto = isRitualPrediletoName(ability.name)
+        const isParanormalAbility = isParanormalAbilityType(ability.ability_type)
+        const abilityElementKey = normalizeText(ability.element ?? "")
+        const paranormalElementStyles = isParanormalAbility
+            ? ritualElementStyleMap[abilityElementKey] ?? ritualElementStyleMap.default
+            : null
+        const paranormalElementIcon = isParanormalAbility
+            ? ritualElementIconMap[abilityElementKey]
+            : null
         const canChooseElementSpecialist = isElementSpecialist && !elementSpecialistChoice
         const canChooseElementMaster = isElementMaster && !elementMasterChoice
         const isClickableAbility =
@@ -5103,9 +5863,14 @@ export default function CharacterSheet() {
             || isConhecimentoAplicado
             || isEcletico
             || isSaberPoder
+            || isMagnumOpus
+            || isCentoDez
+            || isVislumbresDoPassado
             || isSuppressiveFire
             || isCamuflarOcultismo
             || isGuiadoParanormal
+            || isProcessoOtimizado
+            || isFavoriteTools
             || canChooseElementSpecialist
             || canChooseElementMaster
         const abilityClassKey = normalizeText(ability.class_name ?? "")
@@ -5188,6 +5953,13 @@ export default function CharacterSheet() {
                     : "Escolher Ritual"
             )
         }
+        if (isFavoriteTools) {
+            metaParts.push(
+                favoriteToolsItem?.name
+                    ? `Item: ${favoriteToolsItem.name}`
+                    : "Escolher item"
+            )
+        }
 
         return (
             <div
@@ -5209,6 +5981,12 @@ export default function CharacterSheet() {
                                             ? handleActivateEcletico
                                             : isSaberPoder
                                                 ? handleActivateSaberPoder
+                                            : isMagnumOpus
+                                                ? handleActivateMagnumOpus
+                                            : isCentoDez
+                                                ? handleActivateCentoDez
+                                            : isVislumbresDoPassado
+                                                ? handleUseVislumbresDoPassado
                                             : isDemolishingStrike
                                                 ? handleActivateDemolishingStrike
                                                 : isTireless
@@ -5235,6 +6013,10 @@ export default function CharacterSheet() {
                                         ? handleUseCamuflarOcultismo
                                         : isGuiadoParanormal
                                         ? handleUseGuiadoParanormal
+                                        : isProcessoOtimizado
+                                        ? handleActivateProcessoOtimizado
+                                        : isFavoriteTools
+                                        ? () => setIsFavoriteToolsOpen(true)
                                         : canChooseElementSpecialist
                                         ? () => setIsElementSpecialistOpen(true)
                                         : canChooseElementMaster
@@ -5261,6 +6043,12 @@ export default function CharacterSheet() {
                             handleActivateEcletico()
                         } else if (isSaberPoder) {
                             handleActivateSaberPoder()
+                        } else if (isMagnumOpus) {
+                            handleActivateMagnumOpus()
+                        } else if (isCentoDez) {
+                            handleActivateCentoDez()
+                        } else if (isVislumbresDoPassado) {
+                            handleUseVislumbresDoPassado()
                         } else if (isDemolishingStrike) {
                             handleActivateDemolishingStrike()
                         } else if (isTireless) {
@@ -5287,6 +6075,10 @@ export default function CharacterSheet() {
                             handleUseCamuflarOcultismo()
                         } else if (isGuiadoParanormal) {
                             handleUseGuiadoParanormal()
+                        } else if (isProcessoOtimizado) {
+                            handleActivateProcessoOtimizado()
+                        } else if (isFavoriteTools) {
+                            setIsFavoriteToolsOpen(true)
                         } else if (canChooseElementSpecialist) {
                             setIsElementSpecialistOpen(true)
                         } else if (canChooseElementMaster) {
@@ -5296,17 +6088,31 @@ export default function CharacterSheet() {
                 }}
                 role={isClickableAbility ? "button" : undefined}
                 tabIndex={isClickableAbility ? 0 : undefined}
-                className={`flex items-center justify-between gap-3 bg-zinc-900/70 border border-zinc-700 rounded-lg p-3 ${
-                    isClickableAbility
-                        ? `cursor-pointer ${hoverBorderClass} focus:outline-none`
-                        : ""
-                }`}
+                className={`flex items-center justify-between gap-3 border rounded-lg p-3 ${
+                    paranormalElementStyles
+                        ? paranormalElementStyles.card
+                        : "bg-zinc-900/70 border-zinc-700"
+                } ${isClickableAbility ? `cursor-pointer ${hoverBorderClass} focus:outline-none` : ""}`}
             >
                 <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {paranormalElementIcon && (
+                            <div className="h-8 w-8 rounded-full bg-black/40 border border-zinc-700/60 flex items-center justify-center">
+                                <img
+                                    src={paranormalElementIcon}
+                                    alt={`Símbolo de ${formatEnum(ability.element ?? "")}`}
+                                    className="h-5 w-5 object-contain"
+                                />
+                            </div>
+                        )}
                         <span className="text-white font-text">
                             {ability.name}
                         </span>
+                        {isParanormalAbility && ability.element && (
+                            <span className={`text-xs px-2 py-0.5 rounded border ${paranormalElementStyles?.badge ?? "border-zinc-600 text-zinc-200"}`}>
+                                {formatEnum(ability.element)}
+                            </span>
+                        )}
                         {ability.class_name === "especialista" && (
                             <span className="text-emerald-300 border border-emerald-500/40 text-xs px-2 py-0.5 rounded">
                                 Poder de Especialista
@@ -5767,7 +6573,7 @@ export default function CharacterSheet() {
                     )}
                     <div className="-mx-4 w-[calc(100%+2rem)] flex flex-col text-sm text-zinc-300 font-text divide-y divide-zinc-700 border border-zinc-700/70 border-x-0 border-b-0 rounded-none overflow-hidden">
                         <div className="px-4 py-2 text-left">
-                            Categoria: {formatEnum(weapon.category)}
+                            Categoria: {formatCategoryLabel(weapon.category)}
                         </div>
                         <div className="px-4 py-2 text-left">
                             Alcance: {formatEnum(weapon.weapon_range)}
@@ -5819,6 +6625,15 @@ export default function CharacterSheet() {
         const isExpanded = expandedItemIds.includes(item.id)
         const canManage = typeof item.id === "number"
         const itemElement = getRitualItemElement(item.name, item.category)
+        const healFormulaRaw = item.healFormula?.trim() ?? ""
+        const healFormula = healFormulaRaw
+            || (normalizeText(item.name) === "cicatrizante" ? "2d8+2" : null)
+        const isFavoriteToolsItem =
+            favoriteToolsItemKey && String(item.id) === favoriteToolsItemKey
+        const adjustedCategory =
+            isFavoriteToolsItem && typeof item.category === "number"
+                ? Math.max(item.category - 1, 0)
+                : item.category
         const elementStyles = itemElement
             ? ritualElementStyleMap[itemElement] ?? ritualElementStyleMap.default
             : null
@@ -5827,7 +6642,7 @@ export default function CharacterSheet() {
             id: typeof item.id === "number" ? item.id : 0,
             name: item.name,
             description: item.description ?? "",
-            category: item.category ?? "",
+            category: typeof item.category === "number" ? item.category : 0,
             space: item.space
         }
 
@@ -5855,6 +6670,11 @@ export default function CharacterSheet() {
                             <div className="text-white font-text text-lg">
                                 {capitalizeFirst(item.name)}
                             </div>
+                            {isFavoriteToolsItem && (
+                                <span className="text-emerald-300 border border-emerald-500/40 text-xs px-2 py-0.5 rounded">
+                                    Ferramentas favoritas
+                                </span>
+                            )}
                             <button
                                 type="button"
                                 onClick={() => {
@@ -5913,12 +6733,31 @@ export default function CharacterSheet() {
                     )}
                     <div className="-mx-4 w-[calc(100%+2rem)] flex flex-col text-sm text-zinc-300 font-text divide-y divide-zinc-700 border border-zinc-700/70 border-x-0 border-b-0 rounded-none overflow-hidden">
                         <div className="px-4 py-2 text-left">
-                            Categoria: {item.category?.trim() ? formatEnum(item.category) : "-"}
+                            Categoria: {formatCategoryLabel(adjustedCategory)}
                         </div>
                         <div className="px-4 py-2 text-left">
                             Espaço: {item.space}
                         </div>
                     </div>
+                    {healFormula && (
+                        <div className="-mx-4 w-[calc(100%+2rem)] flex border-t border-zinc-700/70">
+                            <button
+                                type="button"
+                                onClick={() => openHealTargetPicker({
+                                    sourceType: "item",
+                                    sourceName: item.name,
+                                    formula: healFormula,
+                                    context: {
+                                        item_id: typeof item.id === "number" ? item.id : undefined
+                                    }
+                                })}
+                                className="w-full py-2 hover:bg-zinc-800 transition-colors font-text text-emerald-300 flex flex-col items-center leading-tight"
+                            >
+                                <span>Curar</span>
+                                <span className="text-xs text-emerald-200">{healFormula}</span>
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         )
@@ -5948,6 +6787,12 @@ export default function CharacterSheet() {
                     const sharedByName = shareCharacters.find((char) => char.id === doc.character_id)?.name
                         ?? characterLabel
                     const shareTarget = shareTargetsByDocument[doc.id] ?? ""
+                    const unshareTarget = unshareTargetsByDocument[doc.id] ?? ""
+                    const isSharedToAll = Boolean(doc.is_shared_to_all)
+                    const sharedUserIds = new Set(
+                        (doc.shared_user_ids ?? []).filter((value) => Number.isFinite(value))
+                    )
+                    const unshareOptions = shareCharacters.filter((char) => sharedUserIds.has(char.user_id))
                     return (
                     <div
                         key={`character-doc-${doc.id}`}
@@ -5973,73 +6818,128 @@ export default function CharacterSheet() {
                         <div className="text-xs text-zinc-500">
                             {formatTimestamp(doc.created_at)} · {formatBytes(doc.size_bytes)}
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            {isPreviewable && (
-                                <button
-                                    type="button"
-                                    onClick={() => handlePreviewDocument(doc)}
-                                    className="px-3 py-1 rounded text-xs font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition"
-                                >
-                                    Visualizar
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => handleDownloadDocument(doc)}
-                                className="px-3 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition"
-                            >
-                                Baixar arquivo
-                            </button>
-                        </div>
-                        {user?.role === "player" && doc.is_released && character && doc.character_id === character.id && (
-                            <div className="flex flex-col gap-2 bg-zinc-800/80 border border-zinc-700 rounded p-2">
-                                <div className="text-xs text-zinc-400">Compartilhar documento</div>
-                                <div className="flex flex-wrap gap-2 items-center">
-                                    <select
-                                        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 font-text"
-                                        value={shareTarget}
-                                        onChange={(event) => {
-                                            const value = event.target.value
-                                            setShareTargetsByDocument((prev) => ({
-                                                ...prev,
-                                                [doc.id]: value ? Number(value) : ""
-                                            }))
-                                        }}
-                                        disabled={sharingDocumentId === doc.id || shareCharacters.length === 0}
-                                    >
-                                        <option value="">
-                                            {shareCharacters.length === 0
-                                                ? "Sem personagens disponíveis"
-                                                : "Escolha um personagem"}
-                                        </option>
-                                        {shareCharacters.map((char) => (
-                                            <option key={`share-doc-${doc.id}-${char.id}`} value={char.id}>
-                                                {char.name}
-                                            </option>
-                                        ))}
-                                    </select>
+                        <div className="flex flex-col gap-2">
+                            <div className="flex flex-wrap gap-2 items-center">
+                                {isPreviewable && (
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            if (!shareTarget) return
-                                            void handleShareDocumentWithCharacter(doc.id, Number(shareTarget))
-                                        }}
-                                        disabled={sharingDocumentId === doc.id || !shareTarget}
-                                        className="px-2 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        onClick={() => handlePreviewDocument(doc)}
+                                        className="w-84 px-3 py-1 rounded text-xs font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition"
                                     >
-                                        Compartilhar com
+                                        Visualizar
                                     </button>
-                                </div>
+                                )}
                                 <button
                                     type="button"
-                                    onClick={() => void handleShareDocumentWithAll(doc.id)}
-                                    disabled={sharingDocumentId === doc.id}
-                                    className="px-2 py-1 rounded text-xs font-smalltitle bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                    onClick={() => handleDownloadDocument(doc)}
+                                    className="w-86 px-3 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition"
                                 >
-                                    Compartilhar com todos
+                                    Baixar arquivo
                                 </button>
                             </div>
-                        )}
+                            {user?.role === "player" && doc.is_released && character && doc.character_id === character.id && (
+                                <>
+                                    <div className="flex flex-wrap gap-2 items-center">
+                                        <select
+                                            className="w-56 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100 font-text"
+                                            value={shareTarget}
+                                            onChange={(event) => {
+                                                const value = event.target.value
+                                                setShareTargetsByDocument((prev) => ({
+                                                    ...prev,
+                                                    [doc.id]: value ? Number(value) : ""
+                                                }))
+                                            }}
+                                            disabled={sharingDocumentId === doc.id || shareCharacters.length === 0}
+                                        >
+                                            <option value="">
+                                                {shareCharacters.length === 0
+                                                    ? "Sem personagens disponíveis"
+                                                    : "Escolha um personagem"}
+                                            </option>
+                                            {shareCharacters.map((char) => (
+                                                <option key={`share-doc-${doc.id}-${char.id}`} value={char.id}>
+                                                    {char.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!shareTarget) return
+                                                void handleShareDocumentWithCharacter(doc.id, Number(shareTarget))
+                                            }}
+                                            disabled={sharingDocumentId === doc.id || !shareTarget}
+                                            className="w-56 px-2 py-1 rounded text-xs font-smalltitle bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            Compartilhar com
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleShareDocumentWithAll(doc.id)}
+                                            disabled={sharingDocumentId === doc.id}
+                                            className="w-56 px-2 py-1 rounded text-xs font-smalltitle bg-emerald-600 text-white hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            Compartilhar com todos
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 items-center">
+                                        <select
+                                            className="w-56 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-100 font-text"
+                                            value={unshareTarget}
+                                            onChange={(event) => {
+                                                const value = event.target.value
+                                                setUnshareTargetsByDocument((prev) => ({
+                                                    ...prev,
+                                                    [doc.id]: value ? Number(value) : ""
+                                                }))
+                                            }}
+                                            disabled={
+                                                sharingDocumentId === doc.id
+                                                || isSharedToAll
+                                            }
+                                        >
+                                            <option value="">
+                                                {isSharedToAll
+                                                    ? "Compartilhado com todos"
+                                                    : shareCharacters.length === 0
+                                                        ? "Sem personagens disponíveis"
+                                                        : unshareOptions.length === 0
+                                                            ? "Nenhum compartilhamento"
+                                                            : "Escolha um personagem"}
+                                            </option>
+                                            {unshareOptions.map((char) => (
+                                                <option key={`unshare-doc-${doc.id}-${char.id}`} value={char.id}>
+                                                    {char.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!unshareTarget || isSharedToAll) return
+                                                void handleUnshareDocumentFromCharacter(doc.id, Number(unshareTarget))
+                                            }}
+                                            disabled={sharingDocumentId === doc.id || !unshareTarget || isSharedToAll}
+                                            className="w-56 px-2 py-1 rounded text-xs font-smalltitle bg-zinc-700 text-white hover:bg-zinc-600 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            Descompartilhar com
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!isSharedToAll) return
+                                                void handleUnshareDocumentFromAll(doc.id)
+                                            }}
+                                            disabled={sharingDocumentId === doc.id || !isSharedToAll}
+                                            className="w-56 px-2 py-1 rounded text-xs font-smalltitle bg-rose-600 text-white hover:bg-rose-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        >
+                                            Descompartilhar com todos
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
                     )
                 })}
@@ -6169,6 +7069,28 @@ export default function CharacterSheet() {
                                     </div>
                                 </div>
 
+                                {(character.nex_total >= 50 || character.paranormal_affinity) && (
+                                    <div className="bg-zinc-900/60 p-3 rounded flex flex-col">
+                                        <span className="text-zinc-300 font-text">Afinidade Paranormal</span>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="text-white font-text text-lg">
+                                                {character.paranormal_affinity
+                                                    ? formatEnum(character.paranormal_affinity)
+                                                    : "Escolha um elemento"}
+                                            </span>
+                                            {!character.paranormal_affinity && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setIsParanormalAffinityOpen(true)}
+                                                    className="px-3 py-1 rounded bg-emerald-500 text-black text-sm font-text hover:bg-emerald-600"
+                                                >
+                                                    Escolher
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="bg-zinc-900/60 p-4 rounded-lg flex flex-col gap-3 col-span-2 md:col-span-3 border border-zinc-700/70">
                                     <div className="flex items-center justify-center gap-2 text-zinc-300 font-text text-base uppercase tracking-wide">
                                         <span>Proficiências</span>
@@ -6204,12 +7126,13 @@ export default function CharacterSheet() {
 
                         {/* Aba Principal */}
                         <StatusSection
-                            character={character}
+                            character={statusCharacter}
                             defenseBonus={defenseBonus}
                             resistanceBonus={resistanceBonus}
                             elementSpecialistChoice={elementSpecialistChoice}
                             onOpenStatusEdit={openStatusEditModal}
                             onStatusChange={handleStatusChange}
+                            lifeNote={calejadoNote}
                         />
                     </div>
 
@@ -6880,6 +7803,65 @@ export default function CharacterSheet() {
                 </div>
             </Modal>
             <Modal
+                isOpen={isParanormalAffinityOpen}
+                onClose={() => {
+                    if (character?.paranormal_affinity) {
+                        setIsParanormalAffinityOpen(false)
+                    }
+                }}
+                className="w-[min(100%-1.5rem,26rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Afinidade Paranormal</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (character?.paranormal_affinity) {
+                                setIsParanormalAffinityOpen(false)
+                            }
+                        }}
+                        className={`text-zinc-400 hover:text-white transition-colors ${
+                            character?.paranormal_affinity ? "" : "opacity-40 cursor-not-allowed"
+                        }`}
+                        aria-label="Fechar"
+                        disabled={!character?.paranormal_affinity}
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text">
+                    <div className="text-zinc-200">
+                        Selecione um elemento para sua afinidade paranormal.
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {elementSpecialistOptions.map((option) => {
+                            const isSelected =
+                                character?.paranormal_affinity
+                                && normalizeText(option.value) === normalizeText(character.paranormal_affinity)
+                            const style =
+                                elementSpecialistStyleMap[option.value] ?? elementSpecialistStyleMap.conhecimento
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => handleSelectParanormalAffinity(option.value)}
+                                    className={`px-3 py-2 rounded border text-sm font-text transition-colors ${
+                                        isSelected ? style.selected : style.base
+                                    }`}
+                                >
+                                    {option.label}
+                                </button>
+                            )
+                        })}
+                    </div>
+                    {character?.paranormal_affinity && (
+                        <div className="text-xs text-zinc-400">
+                            Selecionado: {formatEnum(character.paranormal_affinity)}
+                        </div>
+                    )}
+                </div>
+            </Modal>
+            <Modal
                 isOpen={isRitualPrediletoOpen}
                 onClose={() => setIsRitualPrediletoOpen(false)}
                 className="w-[min(100%-1.5rem,30rem)] max-h-[90vh] overflow-hidden font-sans"
@@ -6941,10 +7923,84 @@ export default function CharacterSheet() {
                 </div>
             </Modal>
             <Modal
+                isOpen={isFavoriteToolsOpen}
+                onClose={() => setIsFavoriteToolsOpen(false)}
+                className="w-[min(100%-1.5rem,30rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Ferramentas Favoritas</div>
+                    <button
+                        type="button"
+                        onClick={() => setIsFavoriteToolsOpen(false)}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
+                    <div className="text-zinc-200">
+                        Selecione um item do inventário (exceto armas) para reduzir a categoria em 1.
+                    </div>
+                    {favoriteToolsOptions.length === 0 && (
+                        <div className="text-sm text-zinc-400">
+                            Nenhum item disponível para selecionar.
+                        </div>
+                    )}
+                    {favoriteToolsOptions.length > 0 && (
+                        <div className="flex flex-col gap-2">
+                            {favoriteToolsOptions.map((item) => {
+                                const isSelected =
+                                    favoriteToolsItemKey && String(item.id) === favoriteToolsItemKey
+                                return (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => handleSelectFavoriteTool(item.id)}
+                                        className={`rounded border px-3 py-2 text-left text-sm transition-colors ${
+                                            isSelected
+                                                ? "border-emerald-500 bg-emerald-500/20 text-emerald-100"
+                                                : "border-zinc-700 bg-zinc-900/70 text-zinc-200 hover:border-emerald-500/60"
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="font-text">
+                                                {capitalizeFirst(item.name)}
+                                            </span>
+                                            <span className="text-xs text-zinc-400">
+                                                Categoria {formatCategoryLabel(item.category)}
+                                            </span>
+                                        </div>
+                                        {item.description?.trim() && (
+                                            <div className="text-xs text-zinc-400">
+                                                {item.description}
+                                            </div>
+                                        )}
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    )}
+                    {favoriteToolsItemKey && favoriteToolsItem?.name && (
+                        <div className="flex items-center justify-between text-xs text-zinc-400">
+                            <span>Selecionado: {capitalizeFirst(favoriteToolsItem.name)}</span>
+                            <button
+                                type="button"
+                                onClick={handleClearFavoriteTool}
+                                className="text-red-300 hover:text-red-200"
+                            >
+                                Limpar seleção
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </Modal>
+            <Modal
                 isOpen={isAbilityPickerOpen}
                 onClose={() => {
                     setIsAbilityPickerOpen(false)
                     setAbilitySearch("")
+                    setAbilityCatalogTab("class")
                 }}
                 className="w-[min(100%-1.5rem,40rem)] max-h-[90vh] overflow-hidden font-sans"
             >
@@ -6955,6 +8011,7 @@ export default function CharacterSheet() {
                         onClick={() => {
                             setIsAbilityPickerOpen(false)
                             setAbilitySearch("")
+                            setAbilityCatalogTab("class")
                         }}
                         className="text-zinc-400 hover:text-white transition-colors"
                         aria-label="Fechar"
@@ -6963,6 +8020,30 @@ export default function CharacterSheet() {
                     </button>
                 </div>
                 <div className="px-4 py-4 flex flex-col gap-4 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setAbilityCatalogTab("class")}
+                            className={`px-3 py-2 rounded text-sm font-text border ${
+                                abilityCatalogTab === "class"
+                                    ? "bg-blue-500 border-blue-400 text-black"
+                                    : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                            }`}
+                        >
+                            Poderes de classe
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setAbilityCatalogTab("paranormal")}
+                            className={`px-3 py-2 rounded text-sm font-text border ${
+                                abilityCatalogTab === "paranormal"
+                                    ? "bg-blue-500 border-blue-400 text-black"
+                                    : "bg-zinc-800 border-zinc-700 text-zinc-200"
+                            }`}
+                        >
+                            Poderes paranormais
+                        </button>
+                    </div>
                     <input
                         type="text"
                         value={abilitySearch}
@@ -6985,14 +8066,42 @@ export default function CharacterSheet() {
                             {availableAbilities.map((ability) => {
                                 const requirementIssues = getAbilityRequirementIssues(ability)
                                 const canAdd = requirementIssues.length === 0
+                                const isParanormalAbility = isParanormalAbilityType(ability.ability_type)
+                                const abilityElementKey = normalizeText(ability.element ?? "")
+                                const elementStyles = isParanormalAbility
+                                    ? ritualElementStyleMap[abilityElementKey] ?? ritualElementStyleMap.default
+                                    : null
+                                const elementIcon = isParanormalAbility
+                                    ? ritualElementIconMap[abilityElementKey]
+                                    : null
                                 return (
                                     <div
                                         key={ability.id}
-                                        className="flex flex-col gap-2 border border-zinc-700 rounded-lg p-3 bg-zinc-900/70"
+                                        className={`flex flex-col gap-2 border rounded-lg p-3 ${
+                                            elementStyles
+                                                ? elementStyles.card
+                                                : "border-zinc-700 bg-zinc-900/70"
+                                        }`}
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="flex flex-col gap-1">
-                                                <span className="text-white">{ability.name}</span>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    {elementIcon && (
+                                                        <div className="h-8 w-8 rounded-full bg-black/40 border border-zinc-700/60 flex items-center justify-center">
+                                                            <img
+                                                                src={elementIcon}
+                                                                alt={`Símbolo de ${formatEnum(ability.element ?? "")}`}
+                                                                className="h-5 w-5 object-contain"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    <span className="text-white">{ability.name}</span>
+                                                    {isParanormalAbility && ability.element && (
+                                                        <span className={`text-xs px-2 py-0.5 rounded border ${elementStyles?.badge ?? "border-zinc-600 text-zinc-200"}`}>
+                                                            {formatEnum(ability.element)}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <span className="text-xs text-zinc-400">
                                                     {ability.is_active ? "Ativa" : "Passiva"} | PE {ability.pe_cost ?? 0}
                                                 </span>
@@ -7113,7 +8222,7 @@ export default function CharacterSheet() {
                                                 <div className="flex flex-col gap-1">
                                                     <span className="text-white">{capitalizeFirst(weapon.name)}</span>
                                                     <span className="text-xs text-zinc-400">
-                                                        {formatEnum(weapon.category)} | Dano {weapon.damage_formula} |{" "}
+                                                        {formatCategoryLabel(weapon.category)} | Dano {weapon.damage_formula} |{" "}
                                                         {formatEnum(weapon.weapon_range)} | Crítico {weapon.threat_margin}x{weapon.critical_multiplier}
                                                     </span>
                                                 </div>
@@ -7157,10 +8266,13 @@ export default function CharacterSheet() {
                             />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <FloatingInput
-                                    label="Categoria (ex: tática)"
+                                    label="Categoria (0-3)"
                                     name="category"
+                                    type="number"
                                     value={weaponForm.category}
                                     onChange={handleWeaponInputChange}
+                                    min={0}
+                                    step={1}
                                     required
                                 />
                                 <FloatingInput
@@ -7261,10 +8373,13 @@ export default function CharacterSheet() {
                             />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <FloatingInput
-                                    label="Categoria (ex: tática)"
+                                    label="Categoria (0-3)"
                                     name="category"
+                                    type="number"
                                     value={weaponForm.category}
                                     onChange={handleWeaponInputChange}
+                                    min={0}
+                                    step={1}
                                     required
                                 />
                                 <FloatingInput
@@ -7450,7 +8565,7 @@ export default function CharacterSheet() {
                                                 <div className="flex flex-col gap-1">
                                                     <span className="text-white">{item.name}</span>
                                                     <span className="text-xs text-zinc-400">
-                                                        {formatEnum(item.category)} | Espaço {item.space}
+                                                        {formatCategoryLabel(item.category)} | Espaço {item.space}
                                                     </span>
                                                 </div>
                                                 <button
@@ -7493,10 +8608,13 @@ export default function CharacterSheet() {
                             />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <FloatingInput
-                                    label="Categoria (ex: ferramenta)"
+                                    label="Categoria (0-3)"
                                     name="category"
+                                    type="number"
                                     value={itemForm.category}
                                     onChange={handleItemInputChange}
+                                    min={0}
+                                    step={1}
                                     required
                                 />
                                 <FloatingInput
@@ -7554,10 +8672,13 @@ export default function CharacterSheet() {
                             />
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <FloatingInput
-                                    label="Categoria (ex: ferramenta)"
+                                    label="Categoria (0-3)"
                                     name="category"
+                                    type="number"
                                     value={itemForm.category}
                                     onChange={handleItemInputChange}
+                                    min={0}
+                                    step={1}
                                     required
                                 />
                                 <FloatingInput
@@ -8242,6 +9363,46 @@ export default function CharacterSheet() {
                     )}
                 </div>
             </Modal>
+            <Modal
+                isOpen={isHealTargetOpen}
+                onClose={() => {
+                    setIsHealTargetOpen(false)
+                    setPendingHealRoll(null)
+                }}
+                className="w-[min(100%-1.5rem,28rem)] max-h-[90vh] overflow-hidden font-sans"
+            >
+                <div className="flex items-center justify-between border-b border-zinc-700/70 px-4 py-3">
+                    <div className="text-sm text-zinc-300">Selecionar alvo da cura</div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setIsHealTargetOpen(false)
+                            setPendingHealRoll(null)
+                        }}
+                        className="text-zinc-400 hover:text-white transition-colors"
+                        aria-label="Fechar"
+                    >
+                        <X />
+                    </button>
+                </div>
+                <div className="px-4 py-4 flex flex-col gap-3 font-text overflow-y-auto scrollbar-ordo max-h-[calc(90vh-3.5rem)]">
+                    {healTargetOptions.length === 0 && (
+                        <div className="text-zinc-300">Nenhum personagem disponível.</div>
+                    )}
+                    {healTargetOptions.map((option) => (
+                        <button
+                            key={`heal-target-${option.id}`}
+                            type="button"
+                            onClick={() => handleSelectHealTarget(option.id, option.name)}
+                            className={`w-full rounded border border-zinc-700 px-3 py-2 text-sm text-zinc-200 hover:border-emerald-500/60 ${
+                                option.isSelf ? "bg-emerald-900/40" : "bg-zinc-900/70"
+                            }`}
+                        >
+                            {option.isSelf ? `${option.name} (você)` : option.name}
+                        </button>
+                    ))}
+                </div>
+            </Modal>
 
             <ExpertiseRollModal
                 isOpen={isRollOpen}
@@ -8783,7 +9944,7 @@ export default function CharacterSheet() {
                     }
                 }}
             />
-            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || ritualOutcomeToast || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive || conhecimentoAplicadoActive || ecleticoActive || saberPoderActive || isTrilhaCertaPromptOpen) && (
+            {(pendingSpecialAttack || pendingDemolishingStrike || opportunityToast || ritualOutcomeToast || temporaryEffort > 0 || defensiveCombatActive || dualWieldActive || triggerHoldActive || sentidoTaticoActive || conhecimentoAplicadoActive || ecleticoActive || saberPoderActive || magnumOpusActive || centoDezActive || isTrilhaCertaPromptOpen) && (
                 <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
                     {pendingSpecialAttack && (
                         <div className="min-w-[16rem] max-w-88 rounded-lg border border-red-500/40 bg-red-900/30 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
@@ -8820,6 +9981,22 @@ export default function CharacterSheet() {
                     {opportunityToast && (
                         <div className="min-w-[16rem] max-w-88 rounded-lg border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-amber-100 shadow-lg backdrop-blur">
                             <div className="text-sm font-text">{opportunityToast}</div>
+                        </div>
+                    )}
+                    {temporaryEffort > 0 && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-emerald-500/40 bg-emerald-900/30 px-4 py-3 text-emerald-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">
+                                PE temporários ativos: +{temporaryEffort}
+                            </div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setTemporaryEffort(0)}
+                                    className="text-xs text-emerald-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Encerrar
+                                </button>
+                            </div>
                         </div>
                     )}
                     {ritualOutcomeToast && (
@@ -8885,6 +10062,40 @@ export default function CharacterSheet() {
                                     className="text-xs text-emerald-100 hover:text-white underline underline-offset-2"
                                 >
                                     Cancelar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {magnumOpusActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-amber-500/40 bg-amber-900/30 px-4 py-3 text-amber-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">Magnum Opus ativo</div>
+                            <div className="text-xs text-amber-200">
+                                Próximo teste de Presença recebe +5
+                            </div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelMagnumOpus}
+                                    className="text-xs text-amber-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Encerrar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {centoDezActive && (
+                        <div className="min-w-[16rem] max-w-88 rounded-lg border border-lime-500/40 bg-lime-900/30 px-4 py-3 text-lime-100 shadow-lg backdrop-blur">
+                            <div className="text-sm font-text">110% ativo</div>
+                            <div className="text-xs text-lime-200">
+                                Próximo teste de Força/Agilidade recebe +5 (exceto Luta/Pontaria)
+                            </div>
+                            <div className="mt-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={handleCancelCentoDez}
+                                    className="text-xs text-lime-100 hover:text-white underline underline-offset-2"
+                                >
+                                    Encerrar
                                 </button>
                             </div>
                         </div>
