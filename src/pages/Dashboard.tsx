@@ -1,4 +1,4 @@
-﻿import { Trash2 } from "lucide-react"
+﻿import { Trash2, User } from "lucide-react"
 import { useAuth } from "../contexts/useAuth"
 import { useNavigate } from "react-router-dom"
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
@@ -1001,7 +1001,19 @@ export default function Dashboard() {
                                         className="py-2 px-3 bg-amber-500 hover:bg-amber-600 rounded text-white text-sm font-smalltitle transition"
                                         onClick={() => navigate(`/characters/${char.id}`)}
                                     >
-                                        Ver ficha
+                                        Ver Ficha
+                                    </button>
+                                    <button
+                                        className="py-2 px-3 bg-blue-600 hover:bg-blue-700 rounded text-white transition"
+                                        onClick={() =>
+                                            window.open(
+                                                `/character/${char.id}/portrait`,
+                                                "_blank"
+                                            )
+                                        }
+                                        title="Modo Jogador"
+                                    >
+                                        <User size={16} />
                                     </button>
                                 </div>
 

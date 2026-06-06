@@ -7,9 +7,6 @@ import MainLayout from '../components/MainLayout'
 export default function Home(){
     const [authMode, setAuthMode] = useState<"login" | "register" | null>(null)
 
-console.log(import.meta.env)
-console.log(import.meta.env.VITE_TEST)
-
     return (
         <MainLayout>
             <div className="flex flex-col items-center justify-center min-h-screen px-6">

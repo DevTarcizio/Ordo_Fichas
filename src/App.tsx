@@ -6,6 +6,7 @@ const Home = lazy(() => import("./pages/Home"))
 const Dashboard = lazy(() => import("./pages/Dashboard"))
 const CreateCharacter = lazy(() => import("./pages/CreateCharacter"))
 const CharacterSheet = lazy(() => import("./pages/CharacterSheet"))
+const CharacterPortrait = lazy(() => import("./pages/CharacterPortrait"))
 
 function App() {
   return (
@@ -48,6 +49,11 @@ function App() {
             <CharacterSheet />
           </PrivateRoute>
         }
+      />
+
+      <Route
+        path="/character/:id/portrait"
+        element={<CharacterPortrait />}
       />
 
 
