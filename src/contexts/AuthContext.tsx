@@ -28,7 +28,7 @@ function decodeToken(token: string): User | null {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshTimeout = useRef<number | null>(null)
-    const refreshLoginRef = useRef<(oldToken: string) => Promise<void>>()
+    const refreshLoginRef = useRef<((oldToken: string) => Promise<void>) | null>(null)
     const storedToken = localStorage.getItem("token")
     const [token, setToken] = useState<string | null>(storedToken)
     const [user, setUser] = useState<User | null>(null)
