@@ -92,6 +92,7 @@ export type CharacterSummary = {
 
 export type CharacterDetails = CharacterSummary & {
     nationality: string
+    portrait_mode: string
     avatar: string
     subclass: string
     trail: string

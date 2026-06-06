@@ -1387,6 +1387,39 @@ export default function CharacterSheet() {
     const { user } = useAuth()
     const token = localStorage.getItem("token")
 
+    const updatePortraitMode = async (
+        mode: "default" | "combat"
+    ) => {
+        if (!character) return
+
+        try {
+            const token = localStorage.getItem("token")
+
+            await api.patch(
+                `/characters/${character.id}/portrait_mode`,
+                {
+                    portrait_mode: mode
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                }
+            )
+
+            setCharacter((prev) =>
+                prev
+                    ? {
+                        ...prev,
+                        portrait_mode: mode
+                    }
+                    : prev
+            )
+        } catch (error) {
+            console.error(error)
+        }
+    }
+
     const fetchInventorySpace = useCallback(async () => {
         if (!id) return
         try {
@@ -7132,6 +7165,7 @@ export default function CharacterSheet() {
                             elementSpecialistChoice={elementSpecialistChoice}
                             onOpenStatusEdit={openStatusEditModal}
                             onStatusChange={handleStatusChange}
+                            onUpdatePortraitMode={updatePortraitMode}
                             lifeNote={calejadoNote}
                         />
                     </div>

@@ -12,6 +12,7 @@ type StatusSectionProps = {
     elementSpecialistChoice: string | null
     onOpenStatusEdit: () => void
     onStatusChange: (field: StatusField, maxField: StatusMaxField, delta: number) => void
+    onUpdatePortraitMode: (mode: "default" | "combat") => void
     lifeNote?: string | null
 }
 
@@ -22,6 +23,7 @@ function StatusSectionBase({
     elementSpecialistChoice,
     onOpenStatusEdit,
     onStatusChange,
+    onUpdatePortraitMode,
     lifeNote
 }: StatusSectionProps) {
     return (
@@ -43,6 +45,35 @@ function StatusSectionBase({
                     alt={character.name}
                     className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"
                 />
+
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => onUpdatePortraitMode("default")}
+                        className={`
+                            px-3 py-1 rounded font-text text-sm
+                            ${character.portrait_mode === "default"
+                                ? "bg-blue-600 text-white"
+                                : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}
+                        `}
+                    >
+                        Padrão
+                    </button>
+
+                    <button
+                        onClick={() => {
+    console.log("Combat clicado")
+    onUpdatePortraitMode("combat")
+}}
+                        className={`
+                            px-3 py-1 rounded font-text text-sm
+                            ${character.portrait_mode === "combat"
+                                ? "bg-red-600 text-white"
+                                : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}
+                        `}
+                    >
+                        Combate
+                    </button>
+                </div>
             </div>
 
             <div className="flex flex-col gap-3">
