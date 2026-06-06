@@ -39,40 +39,44 @@ function StatusSectionBase({
                 </button>
             </div>
 
-            <div className="flex justify-center">
+            <div className="flex flex-row items-start justify-center gap-6">
                 <img
                     src={getAvatarSrc(character)}
                     alt={character.name}
                     className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"
                 />
 
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => onUpdatePortraitMode("default")}
-                        className={`
-                            px-3 py-1 rounded font-text text-sm
-                            ${character.portrait_mode === "default"
-                                ? "bg-blue-600 text-white"
-                                : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}
-                        `}
-                    >
-                        Padrão
-                    </button>
+                <div className="w-full max-w-[16rem] bg-zinc-900/80 border border-zinc-700 rounded-xl">
+                    <div className="border-b border-zinc-700 px-4 py-3 text-center">
+                        <span className="text-sm font-elegant_text uppercase tracking-widest text-white">
+                            Portrait
+                        </span>
+                    </div>
+                    <div className="px-4 py-4 flex flex-col items-center gap-3">
+                        <button
+                            onClick={() => onUpdatePortraitMode("default")}
+                            className={`
+                                w-full px-3 py-2 rounded font-text text-sm
+                                ${character.portrait_mode === "default"
+                                    ? "bg-blue-600 text-white"
+                                    : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}
+                            `}
+                        >
+                            Padrão
+                        </button>
 
-                    <button
-                        onClick={() => {
-    console.log("Combat clicado")
-    onUpdatePortraitMode("combat")
-}}
-                        className={`
-                            px-3 py-1 rounded font-text text-sm
-                            ${character.portrait_mode === "combat"
-                                ? "bg-red-600 text-white"
-                                : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}
-                        `}
-                    >
-                        Combate
-                    </button>
+                        <button
+                            onClick={() => onUpdatePortraitMode("combat")}
+                            className={`
+                                w-full px-3 py-2 rounded font-text text-sm
+                                ${character.portrait_mode === "combat"
+                                    ? "bg-red-600 text-white"
+                                    : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}
+                            `}
+                        >
+                            Combate
+                        </button>
+                    </div>
                 </div>
             </div>
 
