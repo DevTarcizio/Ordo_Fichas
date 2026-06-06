@@ -16,7 +16,11 @@ function decodeToken(token: string): User | null {
     try {
         const decoded = jwtDecode<AuthTokenPayload>(token)
         if (decoded.sub && decoded.role) {
-            return { email: decoded.sub, role: decoded.role, username: decoded.username }
+            return {
+                email: decoded.sub,
+                role: decoded.role,
+                username: decoded.username
+            }
         }
         throw new Error("token inválido: falta sub ou role")
     } catch (err) {
@@ -28,7 +32,8 @@ function decodeToken(token: string): User | null {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshTimeout = useRef<number | null>(null)
-    const refreshLoginRef = useRef<((oldToken: string) => Promise<void>) | null>(null)
+    const refreshLoginRef = useRef<(() => Promise<void>) | null>(null)
+
     const storedToken = localStorage.getItem("token")
     const [token, setToken] = useState<string | null>(storedToken)
     const [user, setUser] = useState<User | null>(null)
@@ -40,44 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     }, [])
 
-    const scheduleRefresh = useCallback((tokenValue: string) => {
-        clearRefreshTimer()
-
-        const decoded = jwtDecode<AuthTokenPayload>(tokenValue)
-        const exp = decoded.exp * 1000
-        const now = Date.now()
-        const timeUntilRefresh = exp - now - 60_000
-
-        if (timeUntilRefresh <= 0) {
-            void refreshLoginRef.current?.(tokenValue)
-            return
-        }
-
-        refreshTimeout.current = window.setTimeout(() => {
-            void refreshLoginRef.current?.(tokenValue)
-        }, timeUntilRefresh)
-    }, [clearRefreshTimer])
-
-    const applySession = useCallback((newToken: string) => {
-        localStorage.setItem("token", newToken)
-        setToken(newToken)
-        setUser(decodeToken(newToken))
-        scheduleRefresh(newToken)
-        setIsLoading(false)
-    }, [scheduleRefresh])
-
-    const logout = useCallback(() => {
-        void api.post("/auth/logout").catch((err) => {
-            console.error("Erro ao deslogar no servidor", err)
-        })
-        clearRefreshTimer()
-        localStorage.removeItem("token")
-        setToken(null)
-        setUser(null)
-        setIsLoading(false)
-    }, [clearRefreshTimer])
-
-    const refreshLogin = useCallback(async (oldToken: string) => {
+    const refreshLogin = useCallback(async () => {
         try {
             const response = await api.post("/auth/refresh_token")
 
@@ -88,15 +56,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             alert("Erro ao refrescar o token")
             logout()
         }
-    }, [applySession, logout])
+    }, [])
 
     refreshLoginRef.current = refreshLogin
+
+    const scheduleRefresh = useCallback(
+        (tokenValue: string) => {
+            clearRefreshTimer()
+
+            const decoded = jwtDecode<AuthTokenPayload>(tokenValue)
+            const exp = decoded.exp * 1000
+            const now = Date.now()
+            const timeUntilRefresh = exp - now - 60_000
+
+            if (timeUntilRefresh <= 0) {
+                void refreshLoginRef.current?.()
+                return
+            }
+
+            refreshTimeout.current = window.setTimeout(() => {
+                void refreshLoginRef.current?.()
+            }, timeUntilRefresh)
+        },
+        [clearRefreshTimer]
+    )
+
+    const applySession = useCallback(
+        (newToken: string) => {
+            localStorage.setItem("token", newToken)
+            setToken(newToken)
+            setUser(decodeToken(newToken))
+            scheduleRefresh(newToken)
+            setIsLoading(false)
+        },
+        [scheduleRefresh]
+    )
+
+    const logout = useCallback(() => {
+        void api.post("/auth/logout").catch((err) => {
+            console.error("Erro ao deslogar no servidor", err)
+        })
+
+        clearRefreshTimer()
+        localStorage.removeItem("token")
+        setToken(null)
+        setUser(null)
+        setIsLoading(false)
+    }, [clearRefreshTimer])
 
     useEffect(() => {
         let isMounted = true
 
         const initializeAuth = async () => {
             const stored = localStorage.getItem("token")
+
             if (!stored) {
                 if (isMounted) setIsLoading(false)
                 return
@@ -107,10 +120,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const expMs = decoded.exp * 1000
                 const now = Date.now()
 
-                if (decoded.sub && decoded.role && decoded.exp && expMs > now) {
-                    setUser({ email: decoded.sub, role: decoded.role, username: decoded.username })
+                if (decoded.sub && decoded.role && expMs > now) {
+                    setUser({
+                        email: decoded.sub,
+                        role: decoded.role,
+                        username: decoded.username
+                    })
                     setToken(stored)
                     scheduleRefresh(stored)
+
                     if (isMounted) setIsLoading(false)
                     return
                 }
@@ -119,7 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
 
             try {
-                await refreshLogin(stored)
+                await refreshLogin()
             } finally {
                 if (isMounted) setIsLoading(false)
             }
@@ -133,9 +151,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     }, [clearRefreshTimer, scheduleRefresh, refreshLogin])
 
-    const login = useCallback((newToken: string) => {
-        applySession(newToken)
-    }, [applySession])
+    const login = useCallback(
+        (newToken: string) => {
+            applySession(newToken)
+        },
+        [applySession]
+    )
 
     return (
         <AuthContext.Provider
