@@ -46,7 +46,7 @@ export default function CharacterPortrait() {
     const portraitPath = `/avatars/${firstName}/${firstName}_portrait.png`
 
     return (
-        <div className="relative min-h-screen bg-zinc-100 overflow-hidden">
+        <div className="relative w-full min-h-screen bg-transparent overflow-hidden">
             <img
                 src={portraitPath}
                 alt={character.name}

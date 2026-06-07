@@ -57,6 +57,14 @@
   font-display: swap;
 }
 
+html,
+body,
+#root {
+  background: transparent !important;
+  background-color: transparent !important;
+  min-height: 100%;
+}
+
 .font-statusbar-tight {
   font-family: "statusbar", sans-serif;
   line-height: normal;     /* centraliza verticalmente */

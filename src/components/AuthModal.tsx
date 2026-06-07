@@ -97,7 +97,7 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
             </button>
 
             <h1 className="font-elegant_text text-3xl mb-6 text-center">
-                {isLogin ? "ENTRAR" : "CRIAR CONTA"}
+                {isLogin ? "Entrar" : "Criar Conta"}
             </h1>
 
             {error && (
