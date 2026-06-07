@@ -11,13 +11,7 @@ export default function CharacterPortrait() {
 
     async function loadCharacter() {
         try {
-            const token = localStorage.getItem("token")
-
-            const response = await api.get(`/characters/${id}/`, {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            })
+            const response = await api.get(`/characters/public/${id}/`)
 
             setCharacter(response.data)
         } catch (error) {
