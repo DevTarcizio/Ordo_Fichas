@@ -16,6 +16,25 @@
   animation: fadeUp 0.8s ease-out forwards;
 }
 
+@keyframes fadeSwitch {
+  0% {
+    opacity: 1;
+  }
+  45% {
+    opacity: 0;
+  }
+  55% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.animate-fade-switch {
+  animation: fadeSwitch 450ms ease-in-out;
+}
+
 @font-face {
   font-family: "BigTitles";
   src: url("/fonts/exodus_stripped.otf") format("opentype");

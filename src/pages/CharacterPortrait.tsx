@@ -8,6 +8,13 @@ export default function CharacterPortrait() {
 
     const [character, setCharacter] = useState<CharacterDetails | null>(null)
     const [loading, setLoading] = useState(true)
+    const [displayMode, setDisplayMode] = useState<string | null>(null)
+    const [animating, setAnimating] = useState(false)
+    const animDuration = 450 // ms, matches CSS
+    const timers = {
+        t1: null as any,
+        t2: null as any,
+    }
 
     async function loadCharacter() {
         try {
@@ -31,6 +38,31 @@ export default function CharacterPortrait() {
         return () => clearInterval(interval)
     }, [id])
 
+    useEffect(() => {
+        if (!character) return
+
+        if (displayMode === null) {
+            setDisplayMode(character.portrait_mode)
+            return
+        }
+
+        if (character.portrait_mode === displayMode) return
+
+        setAnimating(true)
+        timers.t1 = setTimeout(() => {
+            setDisplayMode(character.portrait_mode)
+        }, animDuration / 2)
+
+        timers.t2 = setTimeout(() => {
+            setAnimating(false)
+        }, animDuration)
+
+        return () => {
+            clearTimeout(timers.t1)
+            clearTimeout(timers.t2)
+        }
+    }, [character?.portrait_mode])
+
     if (loading) {
         return <div>Carregando...</div>
     }
@@ -46,8 +78,9 @@ export default function CharacterPortrait() {
     const portraitPath = `/avatars/${firstName}/${firstName}_portrait.png`
 
     return (
-        <div className="relative w-full min-h-screen bg-transparent overflow-hidden">
+        <div className={`relative w-full min-h-screen bg-transparent overflow-hidden ${animating ? 'animate-fade-switch' : ''}`}>
             <img
+                key={displayMode ?? 'portrait'}
                 src={portraitPath}
                 alt={character.name}
                 className="
