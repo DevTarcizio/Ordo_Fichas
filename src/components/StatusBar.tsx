@@ -29,66 +29,119 @@ function StatusBarBase({ label, current, max, icon: Icon, gradient, onChange, re
     return (
         <div className="w-full flex flex-col gap-2">
 
-            {/* Linha de Controles */}
-            <div className={headerClass}>
-
-                {!readOnly && (
-                    <div className="flex items-center gap-2">
-                        <button 
-                            className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm"
-                            onClick={() => handleChange(-5)}    
-                        >
-                            <ChevronsLeft size={16}/>
-                            - 5
-                        </button>
-
-                        <button 
-                            className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm"
-                            onClick={() => handleChange(-1)}
-                        >
-                            <ChevronLeft size={16}/>
-                            - 1
-                        </button>
-                    </div>  
-                )}
-
-                <div className="flex items-center gap-1">
+            {/* MOBILE */}
+            <div className="md:hidden">
+                <div className="flex items-center justify-center gap-2 mb-2 text-2xl font-smalltitle">
                     <Icon size={24} />
-                    <span className="">{label}</span>
+                    <span>{label}</span>
+                </div>
+
+                <div className="relative w-full h-8 bg-zinc-700 rounded overflow-hidden">
+                    <div
+                        className={`h-full w-full ${gradient}`}
+                        style={{
+                            transform: `scaleX(${percent / 100})`,
+                            transformOrigin: "left"
+                        }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center text-lg font-text text-white">
+                        {normalizedCurrent} / {normalizedMax}
+                    </div>
                 </div>
 
                 {!readOnly && (
-                    <div className="flex items-center gap-2">
-                        <button 
-                            className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm"
-                            onClick={() => handleChange(1)}
-                        >
-                            + 1
-                            <ChevronRight size={16}/>
-                        </button>
+                    <div className="flex justify-between mt-2">
+                        <div className="flex gap-2">
+                            <button
+                                className="px-3 py-2 bg-zinc-700 rounded"
+                                onClick={() => handleChange(-5)}
+                            >
+                                <ChevronsLeft size={16}/>
+                            </button>
 
-                        <button 
-                            className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm"
-                            onClick={() => handleChange(5)}
-                        >
-                            + 5
-                            <ChevronsRight size={16}/>
-                        </button>
+                            <button
+                                className="px-3 py-2 bg-zinc-700 rounded"
+                                onClick={() => handleChange(-1)}
+                            >
+                                <ChevronLeft size={16}/>
+                            </button>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button
+                                className="px-3 py-2 bg-zinc-700 rounded"
+                                onClick={() => handleChange(1)}
+                            >
+                                <ChevronRight size={16}/>
+                            </button>
+
+                            <button
+                                className="px-3 py-2 bg-zinc-700 rounded"
+                                onClick={() => handleChange(5)}
+                            >
+                                <ChevronsRight size={16}/>
+                            </button>
+                        </div>
                     </div>
                 )}
-
             </div>
 
+            {/* DESKTOP */}
+            <div className="hidden md:block">
+                <div className="w-full flex flex-col gap-2"> 
+                    {/* Linha de Controles */} 
+                    <div className={headerClass}> 
+                        {!readOnly && ( 
+                            <div className="flex items-center gap-2"> 
+                                <button 
+                                    className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm" 
+                                    onClick={() => handleChange(-5)} 
+                                > 
+                                    <ChevronsLeft size={16}/>
+                                </button> 
+                                <button 
+                                    className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm" 
+                                    onClick={() => handleChange(-1)} 
+                                > 
+                                    <ChevronLeft size={16}/>
+                                </button> 
+                            </div> 
+                        )} 
+                        
+                        <div className="flex items-center gap-1"> 
+                            <Icon size={24} /> 
+                            <span className="">{label}</span> 
+                        </div> 
+                        
+                        {!readOnly && ( 
+                            <div className="flex items-center gap-2"> 
+                                <button 
+                                    className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm" 
+                                    onClick={() => handleChange(1)} 
+                                > 
+                                    <ChevronRight size={16}/> 
+                                </button> 
+                                <button 
+                                    className="flex items-center gap-1 px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 text-sm" 
+                                    onClick={() => handleChange(5)} 
+                                > 
+                                    <ChevronsRight size={16}/> 
+                                </button> 
+                            </div> 
+                        )} 
+                    </div> 
 
-            {/* Barra */}
-            <div className="relative w-full h-8 bg-zinc-700 rounded overflow-hidden">
-                <div 
-                    className={`h-full w-full ${gradient} transition-transform duration-500 will-change-transform`}
-                    style={{ transform: `scaleX(${percent / 100})`, transformOrigin: "left" }}
-                />
-
-                <div className="absolute inset-0 flex items-center justify-center text-lg font-text text-white drop-shadow">
-                    {normalizedCurrent} / {normalizedMax}
+                    {/* Barra */} 
+                    <div className="relative w-full h-8 bg-zinc-700 rounded overflow-hidden"> 
+                        <div 
+                            className={`h-full w-full ${gradient} transition-transform duration-500 will-change-transform`} 
+                            style={{ transform: `scaleX(${percent / 100})`, transformOrigin: "left" }} 
+                        /> 
+                        
+                        <div className="absolute inset-0 flex items-center justify-center text-lg font-text text-white drop-shadow"> 
+                            {normalizedCurrent} / {normalizedMax} 
+                        </div> 
+                    </div> 
                 </div>
             </div>
         </div>

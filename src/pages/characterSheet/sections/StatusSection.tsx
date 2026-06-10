@@ -39,20 +39,20 @@ function StatusSectionBase({
                 </button>
             </div>
 
-            <div className="flex flex-row items-start justify-center gap-6">
+            <div className="flex flex-col md:flex-row items-center justify-center gap-6">
                 <img
                     src={getAvatarSrc(character)}
                     alt={character.name}
-                    className="w-64 h-64 rounded-full border-2 border-zinc-500 object-cover"
+                    className="w-48 h-48 md:w-64 md:h-64 rounded-full border-2 border-zinc-500 object-cover"
                 />
 
-                <div className="w-full max-w-[16rem] bg-zinc-900/80 border border-zinc-700 rounded-xl">
+                <div className="w-full maw-w-sm md:max-w-[16rem] bg-zinc-900/80 border border-zinc-700 rounded-xl">
                     <div className="border-b border-zinc-700 px-4 py-3 text-center">
                         <span className="text-sm font-elegant_text uppercase tracking-widest text-white">
                             Portrait
                         </span>
                     </div>
-                    <div className="px-4 py-4 flex flex-col items-center gap-3">
+                    <div className="p-3 flex md:flex-col gap-2">
                         <button
                             onClick={() => onUpdatePortraitMode("default")}
                             className={`
