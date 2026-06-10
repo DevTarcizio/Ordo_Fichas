@@ -503,7 +503,7 @@ export default function CreateCharacter() {
 
                     {/* Header do Card*/}
                     <div className="bg-zinc-900 p-6 flex justify-center">
-                        <h1 className="text-3xl font-elegant_text text-yellow-500">
+                        <h1 className="text-3xl font-elegant_text text-amber-500">
                             Criar Personagem
                         </h1>
                     </div>
@@ -519,7 +519,7 @@ export default function CreateCharacter() {
                                     {/* Coluna 1 - Inputs Principais */}
                                     <div className="flex-1 flex flex-col gap-4">
 
-                                <h2 className="text-xl font-elegant_text text-yellow-400 mb-2 text-center">
+                                <h2 className="text-xl font-elegant_text text-amber-500 mb-2 text-center">
                                     Detalhes Principais
                                 </h2>
 
@@ -692,10 +692,10 @@ export default function CreateCharacter() {
 
                         {step === "attributes" && (
                             <div>
-                                <h2 className="text-2xl font-smalltitle text-blue-400 mb-4 text-center">
+                                <h2 className="text-2xl font-elegant_text text-amber-400 mb-4 text-center">
                                     Atributos
                                 </h2>
-                                <div className="text-sm text-zinc-300 font-text text-center mb-4">
+                                <div className="text-lg text-zinc-300 font-text text-center mb-4">
                                     Você tem {attributePoints} pontos de atributo para distribuir.
                                     <br />
                                     Valor máximo inicial: 3.
@@ -731,7 +731,7 @@ export default function CreateCharacter() {
 
                         {step === "expertise" && (
                             <div>
-                                <h2 className="text-2xl font-smalltitle text-blue-400 text-center">
+                                <h2 className="text-2xl font-elegant_text text-amber-400 text-center">
                                     Perícias
                                 </h2>
                                 <div className="mt-2 bg-zinc-900/70 border border-zinc-700 rounded-lg p-4">
@@ -809,25 +809,25 @@ export default function CreateCharacter() {
                             </div>
                         )}
 
-                        <div className="flex justify-end gap-4 mt-4">
+                        <div className="flex justify-center md:justify-end gap-4 mt-4">
                             {step === "details" ? (
                                 <>
                                     <button
                                         type="button"
                                         onClick={() => navigate("/dashboard/")}
-                                        className="px-6 py-3 bg-zinc-600 rounded hover:bg-zinc-700 font-text"
+                                        className="px-6 py-3 bg-red-600 rounded hover:bg-red-700 font-text"
                                     >
                                         Cancelar
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-6 py-3 bg-blue-600 rounded hover:bg-blue-700 font-text"
+                                        className="px-6 py-3 bg-amber-600 rounded hover:bg-amber-700 font-text"
                                     >
                                         Selecionar Atributos
                                     </button>
                                 </>
                             ) : step === "attributes" ? (
-                                <>
+                                <div className="flex gap-4 mt-8">
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -840,11 +840,11 @@ export default function CreateCharacter() {
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-6 py-3 bg-blue-600 rounded hover:bg-blue-700 font-text"
+                                        className="px-6 py-3 bg-amber-600 rounded hover:bg-amber-700 font-text"
                                     >
                                         Selecionar Perícias
                                     </button>
-                                </>
+                                </div>
                             ) : (
                                 <>
                                     <button
@@ -859,7 +859,7 @@ export default function CreateCharacter() {
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-6 py-3 bg-blue-600 rounded hover:bg-blue-700 font-text"
+                                        className="px-6 py-3 bg-amber-600 rounded hover:bg-amber-700 font-text"
                                     >
                                         Criar Personagem
                                     </button>

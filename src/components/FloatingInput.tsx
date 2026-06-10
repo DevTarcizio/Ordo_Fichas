@@ -27,11 +27,11 @@ export default function FloatingInput({
                 onChange={onChange}
                 placeholder=""
                 {...inputProps}
-                className="peer w-full px-4 pt-5 pb-3 border border-zinc-700 rounded-lg bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-yellow-600 font-text"
+                className="peer w-full px-4 pt-5 pb-3 border border-zinc-700 rounded-lg bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-amber-600 font-text"
             />
             <label 
                 htmlFor={name}
-                className={`absolute left-4 text-zinc-400 transition-all duration-200 ${value ? "top-1 text-sm text-yellow-400" : "top-3 text-base text-zinc-400"} peer-focus:top-1 peer-focus:text-sm peer-focus:text-yellow-400 font-text`}
+                className={`absolute left-4 text-zinc-400 transition-all duration-200 ${value ? "top-1 text-sm text-amber-400" : "top-3 text-base text-zinc-400"} peer-focus:top-1 peer-focus:text-sm peer-focus:text-amber-400 font-text`}
             >
                 {label}
             </label>
