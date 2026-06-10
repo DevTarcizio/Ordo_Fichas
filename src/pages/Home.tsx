@@ -10,7 +10,7 @@ export default function Home(){
         <MainLayout>
             <div className="flex flex-col items-center justify-center min-h-screen px-6">
 
-                <img src={logo} alt="Ordo Praesidium" className="w-[30vw] md:w-[300px] -mt-10 mb-6 animate-fade-up"/>
+                <img src={logo} alt="Ordo Praesidium" className="w-[60vw] md:w-[350px] -mt-10 mb-6 animate-fade-up"/>
 
                 <p className="font-elegant_text text-zinc-200 -mt-4 mb-8 max-w-md text-center">
                     Sistema de fichas personalizado para os jogadores de Ordo Praesidium RPG

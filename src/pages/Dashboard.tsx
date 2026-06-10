@@ -983,24 +983,46 @@ export default function Dashboard() {
                                             </button>
                                         </div>
 
-                                        <div className="flex items-start gap-4 min-w-0">
+                                        <div className="flex flex-col md:flex-row items-center gap-4 min-w-0">
                                             {avatarUrl && (
                                                 <img
                                                     src={avatarUrl}
                                                     alt={char.name}
-                                                    className="w-24 h-24 rounded-full border border-zinc-600 object-cover"
+                                                    className="
+                                                        w-44
+                                                        h-44
+                                                        md:w-32
+                                                        md:h-32
+                                                        rounded-full
+                                                        border-2
+                                                        border-zinc-600
+                                                        object-cover
+                                                        shrink-0
+                                                    "
                                                 />
                                             )}
-                                            <div className="w-px bg-zinc-600/80 self-stretch" />
-                                            <div className="grid grid-cols-2 gap-x-6 gap-y-1 min-w-0">
-                                                <p className="text-zinc-300 font-text">Classe: {char.character_class}</p>
-                                                <p className="text-zinc-300 font-text">Trilha: {trailLabel}</p>
-                                                <p className="text-zinc-300 font-text">Patente: {char.rank}</p>
-                                                <p className="text-zinc-300 font-text">Subclasse: {subclassLabel}</p>
+
+                                            {/* Separador Mobile */}
+                                            <div className="w-full h-px bg-zinc-600/80 md:hidden" />
+
+                                            {/* Separador Desktop */}
+                                            <div className="hidden md:block w-px bg-zinc-600/80 self-stretch" />
+
+                                            <div className="flex flex-col gap-2 w-full">
                                                 <p className="text-zinc-300 font-text">
-                                                    Origem: {originLabel}
+                                                    <span className="text-amber-500">Classe:</span>{" "}
+                                                    {char.character_class}
                                                 </p>
-                                                <p className="text-zinc-300 font-text">NEX total: {nexTotalLabel}</p>
+
+                                                <p className="text-zinc-300 font-text">
+                                                    <span className="text-amber-500">Subclasse:</span>{" "}
+                                                    {subclassLabel}
+                                                </p>
+
+                                                <p className="text-zinc-300 font-text">
+                                                    <span className="text-amber-500">NEX Total:</span>{" "}
+                                                    {nexTotalLabel}
+                                                </p>
                                             </div>
                                         </div>
 

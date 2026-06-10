@@ -502,8 +502,8 @@ export default function CreateCharacter() {
                 >
 
                     {/* Header do Card*/}
-                    <div className="bg-zinc-900 p-6">
-                        <h1 className="text-3xl font-bigtitle text-blue-500">
+                    <div className="bg-zinc-900 p-6 flex justify-center">
+                        <h1 className="text-3xl font-elegant_text text-yellow-500">
                             Criar Personagem
                         </h1>
                     </div>
@@ -519,12 +519,12 @@ export default function CreateCharacter() {
                                     {/* Coluna 1 - Inputs Principais */}
                                     <div className="flex-1 flex flex-col gap-4">
 
-                                <h2 className="text-xl font-smalltitle text-blue-400 mb-2 text-center">
+                                <h2 className="text-xl font-elegant_text text-yellow-400 mb-2 text-center">
                                     Detalhes Principais
                                 </h2>
 
                                 {/* Primeira Linha */}
-                                <div className="grid w-full grid-cols-4 gap-4">
+                                <div className="grid w-full grid-cols-2 md:grid-cols-4 gap-4">
 
                                     
                                     <div className="w-full"> 

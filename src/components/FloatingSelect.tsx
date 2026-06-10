@@ -14,7 +14,7 @@ export default function FloatingSelect({ label, name, value, options, onChange }
                 id={name}
                 value={value}
                 onChange={onChange}
-                className="peer w-full px-4 pt-5 pb-3 border border-zinc-700 rounded-lg bg-zinc-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-600 font-text"
+                className="peer w-full px-4 pt-5 pb-3 border border-zinc-700 rounded-lg bg-zinc-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-yellow-600 font-text"
             >
                 <option value="" disabled hidden></option>
                 {options.map(opt => (
@@ -23,7 +23,7 @@ export default function FloatingSelect({ label, name, value, options, onChange }
             </select>
             <label 
                 htmlFor={name}
-                className="absolute left-4 top-1 text-sm text-zinc-400 peer-focus:text-blue-400 pointer-events-none transition-colors duration-200 font-text"
+                className="absolute left-4 top-1 text-sm text-zinc-400 peer-focus:text-yellow-400 pointer-events-none transition-colors duration-200 font-text"
             >
                 {label}
             </label>

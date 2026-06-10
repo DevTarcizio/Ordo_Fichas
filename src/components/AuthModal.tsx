@@ -86,7 +86,7 @@ export default function AuthModal({ isOpen, onClose, mode }: Props) {
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            className="w-full max-w-md p-8 border-amber-500/70"
+            className="w-[90vw] max-w-md p-4 md:p-8 border-amber-500/70"
         >
             {/* Botão de Fechar */}
             <button
