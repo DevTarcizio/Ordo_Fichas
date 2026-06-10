@@ -1,7 +1,7 @@
-﻿import { Trash2, User } from "lucide-react"
+﻿import { Clipboard, Plus, Trash2, User } from "lucide-react"
 import { useAuth } from "../contexts/useAuth"
 import { useNavigate } from "react-router-dom"
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
 import { formatEnum } from "../utils"
@@ -458,6 +458,10 @@ export default function Dashboard() {
     const [isUploadingDocument, setIsUploadingDocument] = useState(false)
     const [uploadError, setUploadError] = useState<string | null>(null)
     const [uploadSuccess, setUploadSuccess] = useState<string | null>(null)
+    const [portraitUploadCharacterId, setPortraitUploadCharacterId] = useState<number | null>(null)
+    const [isUploadingPortrait, setIsUploadingPortrait] = useState(false)
+    const [portraitUploadError, setPortraitUploadError] = useState<string | null>(null)
+    const [portraitUploadSuccess, setPortraitUploadSuccess] = useState<string | null>(null)
     const [releasingDocumentId, setReleasingDocumentId] = useState<number | null>(null)
     const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null)
     const isFetchingRef = useRef(false)
@@ -469,6 +473,7 @@ export default function Dashboard() {
     const wsHeartbeatRef = useRef<number | null>(null)
     const wsRetryRef = useRef(0)
     const documentFileInputRef = useRef<HTMLInputElement | null>(null)
+    const portraitFileInputRef = useRef<HTMLInputElement | null>(null)
 
     useEffect(() => {
         if (!user && !isLoading) {
@@ -597,6 +602,60 @@ export default function Dashboard() {
             setIsUploadingDocument(false)
         }
     }, [documentCharacterId, documentFile, documentFoundLocation, user])
+
+    const handlePortraitUploadClick = useCallback((characterId: number) => {
+        setPortraitUploadError(null)
+        setPortraitUploadSuccess(null)
+        setPortraitUploadCharacterId(characterId)
+        if (portraitFileInputRef.current) {
+            portraitFileInputRef.current.value = ""
+            portraitFileInputRef.current.click()
+        }
+    }, [])
+
+    const handlePortraitFileChange = useCallback(
+        async (event: ChangeEvent<HTMLInputElement>) => {
+            const file = event.target.files?.[0] ?? null
+            if (!file || portraitUploadCharacterId === null) {
+                setPortraitUploadCharacterId(null)
+                return
+            }
+
+            setPortraitUploadError(null)
+            setPortraitUploadSuccess(null)
+
+            const formData = new FormData()
+            formData.append("file", file)
+
+            try {
+                setIsUploadingPortrait(true)
+                const response = await api.post(
+                    `/characters/${portraitUploadCharacterId}/portrait`,
+                    formData,
+                    {
+                        headers: { "Content-Type": "multipart/form-data" }
+                    }
+                )
+
+                setPortraitUploadSuccess("Portrait enviado com sucesso.")
+                setCharacters((prev) =>
+                    prev.map((item) =>
+                        item.id === portraitUploadCharacterId ? { ...item, ...response.data } : item
+                    )
+                )
+            } catch (err) {
+                console.error("Erro ao enviar portrait: ", err)
+                setPortraitUploadError("Erro ao enviar portrait.")
+            } finally {
+                setIsUploadingPortrait(false)
+                setPortraitUploadCharacterId(null)
+                if (portraitFileInputRef.current) {
+                    portraitFileInputRef.current.value = ""
+                }
+            }
+        },
+        [portraitUploadCharacterId]
+    )
 
     const fetchDocumentBlob = useCallback(async (doc: DocumentSummary) => {
         return api.get(`/documents/${doc.id}/file`, { responseType: "blob" })
@@ -1000,8 +1059,17 @@ export default function Dashboard() {
                                     <button
                                         className="py-2 px-3 bg-amber-500 hover:bg-amber-600 rounded text-white text-sm font-smalltitle transition"
                                         onClick={() => navigate(`/characters/${char.id}`)}
+                                        title="Ver ficha"
                                     >
-                                        Ver Ficha
+                                        <Clipboard size={16} />
+                                    </button>
+                                    <button
+                                        className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 rounded text-white transition disabled:opacity-60 disabled:cursor-not-allowed"
+                                        onClick={() => handlePortraitUploadClick(char.id)}
+                                        title="Enviar portrait"
+                                        disabled={isUploadingPortrait}
+                                    >
+                                        <Plus size={16} />
                                     </button>
                                     <button
                                         className="py-2 px-3 bg-blue-600 hover:bg-blue-700 rounded text-white transition"
@@ -1354,6 +1422,12 @@ export default function Dashboard() {
                     <p>
                         Bem-vindo, <span className="font-text">{user.username ?? user.email}</span>!
                     </p>
+                    {portraitUploadError && (
+                        <p className="mt-2 text-sm text-red-400">{portraitUploadError}</p>
+                    )}
+                    {portraitUploadSuccess && (
+                        <p className="mt-2 text-sm text-emerald-400">{portraitUploadSuccess}</p>
+                    )}
                 </div>
 
                 {/* Botão de logout*/}
@@ -1368,6 +1442,13 @@ export default function Dashboard() {
             <div className="flex flex-1 justify-start items-start w-full">
                 {user.role === "master" ? renderMasterDashboard() : renderPlayerDashboard()}
             </div>
+            <input
+                ref={portraitFileInputRef}
+                type="file"
+                accept=".png,.jpg,.jpeg"
+                className="sr-only"
+                onChange={handlePortraitFileChange}
+            />
         </MainLayout>
     )
 }

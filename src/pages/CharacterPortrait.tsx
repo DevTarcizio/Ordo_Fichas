@@ -71,11 +71,14 @@ export default function CharacterPortrait() {
         return <div>Personagem não encontrado.</div>
     }
 
+
     const firstName = character.name
         .split(" ")[0]
         .toLowerCase()
 
-    const portraitPath = `/avatars/${firstName}/${firstName}_portrait.png`
+    const portraitPath = character.portrait_url
+        ? new URL(character.portrait_url, api.defaults.baseURL).toString()
+        : `/avatars/${firstName}/${firstName}_portrait.png`
 
     return (
         <div className={`relative w-full min-h-screen bg-transparent overflow-hidden ${animating ? 'animate-fade-switch' : ''}`}>

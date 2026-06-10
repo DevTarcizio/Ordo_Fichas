@@ -119,6 +119,7 @@ export type CharacterDetails = CharacterSummary & {
     displacement: number
     PE_per_round: number
     paranormal_affinity?: string | null
+    portrait_url?: string | null
 }
 
 
