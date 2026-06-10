@@ -80,114 +80,70 @@ export default function CharacterPortrait() {
         ? new URL(character.portrait_url, api.defaults.baseURL).toString()
         : `/avatars/${firstName}/${firstName}_portrait.png`
 
+    const healthPercent = character.healthy_max > 0
+        ? Math.round((character.healthy_points / character.healthy_max) * 100)
+        : 0
+    const sanityPercent = character.sanity_max > 0
+        ? Math.round((character.sanity_points / character.sanity_max) * 100)
+        : 0
+    const mainStat = character.portrait_mode === "combat"
+        ? {
+            label: "Esforço",
+            value: `${character.effort_points}`,
+            color: "amber"
+        }
+        : {
+            label: "Investigação",
+            value: `${character.investigation_points}`,
+            color: "emerald"
+        }
+
     return (
-        <div className={`relative w-full min-h-screen bg-transparent overflow-hidden ${animating ? 'animate-fade-switch' : ''}`}>
-            <img
-                key={displayMode ?? 'portrait'}
-                src={portraitPath}
-                alt={character.name}
-                className="
-                    absolute
-                    left-4
-                    top-1/2
-                    -translate-y-1/2
-                    w-[550px]
-                    object-contain
-                "
-            />
-
-            {/* INDICADOR INFERIOR ESQUERDO */}
-            {character.portrait_mode === "combat" ? (
-                <div
-                    className="
-                        absolute
-                        left-[85px]
-                        bottom-[170px]
-                        text-yellow-300
-                        select-none
-                    "
-                >
-                    <div className="text-6xl font-bold leading-none">
-                        {character.effort_points}
-                    </div>
-
-                    <div className="h-[2px] w-24 bg-yellow-300 mt-1 opacity-70" />
+        <div className={`relative min-h-screen bg-zinc-950 text-white overflow-hidden ${animating ? "animate-fade-switch" : ""}`}>
+            <div className="absolute inset-0 bg-black/90" />
+            <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center justify-center gap-6 px-4 py-10">
+                <div className="w-full overflow-hidden rounded-[2rem] border border-zinc-700 bg-black/40 shadow-2xl">
+                    <img
+                        key={displayMode ?? "portrait"}
+                        src={portraitPath}
+                        alt={character.name}
+                        className="w-full object-contain"
+                    />
                 </div>
-            ) : (
-                <div
-                    className="
-                        absolute
-                        left-[85px]
-                        bottom-[170px]
-                        text-emerald-500
-                        select-none
-                    "
-                >
-                    <div className="text-6xl font-bold leading-none">
-                        {character.investigation_points}
-                    </div>
 
-
-                    <div className="h-[2px] w-24 bg-emerald-500 mt-1 opacity-70" />
-                </div>
-            )}
-
-            {/* MODO PADRÃO */}
-            {character.portrait_mode === "default" && (
-                <div
-                    className="
-                        absolute
-                        left-[400px]
-                        top-[42%]
-                        -translate-y-1/2
-                        -rotate-12
-                        text-zinc-400/70
-                        leading-none
-                        pointer-events-none
-                        select-none
-                    "
-                >
-                    <div className="text-8xl font-elegant_text">
-                        {character.name.split(" ")[0]}
-                    </div>
-
-                    <div className="text-8xl font-elegant_text">
-                        {character.name.split(" ").slice(1).join(" ")}
-                    </div>
-                </div>
-            )}
-
-            {/* MODO COMBATE */}
-            {character.portrait_mode === "combat" && (
-                <div
-                    className="
-                        absolute
-                        left-[450px]
-                        top-[42%]
-                        -translate-y-1/2
-                        flex
-                        flex-col
-                        gap-6
-                        select-none
-                    "
-                >
-                    <div>
-                        <div className="text-red-500 text-7xl font-bold drop-shadow-lg">
-                            {character.healthy_points}/{character.healthy_max}
+                <div className="grid w-full gap-4 sm:grid-cols-[1.4fr_0.8fr]">
+                    <div className="rounded-[1.5rem] border border-zinc-700 bg-zinc-900/80 p-5 text-center">
+                        <div className="text-xs uppercase tracking-[0.4em] text-zinc-400">Personagem</div>
+                        <div className="mt-4 text-4xl font-elegant_text leading-tight text-amber-300 sm:text-5xl">
+                            {character.name}
                         </div>
-
-                        <div className="h-3 w-80 bg-red-500/70 rounded-full mt-2" />
                     </div>
 
-                    <div>
-                        <div className="text-blue-500 text-7xl font-bold drop-shadow-lg">
-                            {character.sanity_points}/{character.sanity_max}
+                    <div className={`rounded-[1.5rem] border p-5 ${mainStat.color === "amber" ? "border-amber-500/40 bg-amber-950/70" : "border-emerald-500/40 bg-emerald-950/70"}`}>
+                        <div className="text-xs uppercase tracking-[0.4em] text-zinc-400">{mainStat.label}</div>
+                        <div className={`mt-4 text-5xl font-bold ${mainStat.color === "amber" ? "text-amber-300" : "text-emerald-300"}`}>
+                            {mainStat.value}
                         </div>
-
-                        <div className="h-3 w-80 bg-blue-500/70 rounded-full mt-2" />
                     </div>
                 </div>
-            )}
+
+                <div className="grid w-full gap-4 sm:grid-cols-2">
+                    <div className="rounded-[1.5rem] border border-red-500/40 bg-red-950/70 p-5">
+                        <div className="text-xs uppercase tracking-[0.4em] text-red-300">Vida</div>
+                        <div className="mt-4 text-4xl font-bold text-red-400">{character.healthy_points}/{character.healthy_max}</div>
+                        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-red-500/20">
+                            <div className="h-full rounded-full bg-red-400" style={{ width: `${healthPercent}%` }} />
+                        </div>
+                    </div>
+                    <div className="rounded-[1.5rem] border border-blue-500/40 bg-slate-950/70 p-5">
+                        <div className="text-xs uppercase tracking-[0.4em] text-blue-300">Sanidade</div>
+                        <div className="mt-4 text-4xl font-bold text-blue-300">{character.sanity_points}/{character.sanity_max}</div>
+                        <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-blue-500/20">
+                            <div className="h-full rounded-full bg-blue-400" style={{ width: `${sanityPercent}%` }} />
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     )
 }
