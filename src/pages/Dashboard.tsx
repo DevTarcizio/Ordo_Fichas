@@ -959,9 +959,7 @@ export default function Dashboard() {
                         ) : (
                             characters.map((char) => {
                                 const avatarUrl = getAvatarUrl(char.avatar)
-                                const trailLabel = replaceNoneLabel(char.trail ? formatEnum(char.trail) : "—")
                                 const subclassLabel = replaceNoneLabel(char.subclass ? formatEnum(char.subclass) : "—")
-                                const originLabel = replaceNoneLabel(formatEnum(getOriginName(char.origin))) || "Desconhecida"
                                 const nexTotalLabel =
                                     typeof char.nex_total === "number" ? `${char.nex_total}%` : "—"
                                 return (
