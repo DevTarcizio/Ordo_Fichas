@@ -30,6 +30,7 @@ import LevelUpResultModal from "../components/LevelUpResultModal"
 import Modal from "../components/Modal"
 import StatusSection from "./characterSheet/sections/StatusSection"
 import AttributesSection from "./characterSheet/sections/AttributesSection"
+import AbilitySection from "./characterSheet/sections/AbilitySection"
 import ExpertiseSection from "./characterSheet/sections/ExpertiseSection"
 import InventorySection from "./characterSheet/sections/InventorySection"
 import RitualsSection from "./characterSheet/sections/RitualsSection"
@@ -7181,73 +7182,15 @@ export default function CharacterSheet() {
                         />
 
                         {/* Card Habilidades */}
-                        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-6 shadow-lg backdrop-blur-md flex flex-col gap-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <h1 className="text-blue-400 font-smalltitle text-2xl">Habilidades</h1>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsAbilityPickerOpen(true)}
-                                    className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-black rounded flex items-center gap-2 font-text"
-                                >
-                                    <Plus size={16} />
-                                    Adicionar
-                                </button>
-                            </div>
-                            {abilities.length === 0 && (
-                                <div className="text-zinc-300 font-text">
-                                    Nenhuma habilidade registrada.
-                                </div>
-                            )}
-                            {abilities.length > 0 && (
-                                <div className="flex flex-col gap-4">
-                                    <div className="flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setAbilityTab("active")}
-                                            className={`px-3 py-2 rounded text-sm font-text border ${
-                                                abilityTab === "active"
-                                                    ? "bg-blue-500 border-blue-400 text-black"
-                                                    : "bg-zinc-800 border-zinc-700 text-zinc-200"
-                                            }`}
-                                        >
-                                            Ativas
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setAbilityTab("passive")}
-                                            className={`px-3 py-2 rounded text-sm font-text border ${
-                                                abilityTab === "passive"
-                                                    ? "bg-blue-500 border-blue-400 text-black"
-                                                    : "bg-zinc-800 border-zinc-700 text-zinc-200"
-                                            }`}
-                                        >
-                                            Passivas
-                                        </button>
-                                    </div>
-                                    {abilityTab === "active" ? (
-                                        activeAbilities.length === 0 ? (
-                                            <div className="text-zinc-400 font-text text-sm">
-                                                Nenhuma habilidade ativa.
-                                            </div>
-                                        ) : (
-                                            <div className="flex flex-col gap-3">
-                                                {activeAbilities.map(renderAbilityItem)}
-                                            </div>
-                                        )
-                                    ) : (
-                                        passiveAbilities.length === 0 ? (
-                                            <div className="text-zinc-400 font-text text-sm">
-                                                Nenhuma habilidade passiva.
-                                            </div>
-                                        ) : (
-                                            <div className="flex flex-col gap-3">
-                                                {passiveAbilities.map(renderAbilityItem)}
-                                            </div>
-                                        )
-                                    )}
-                                </div>
-                            )}
-                        </div>
+                        <AbilitySection
+                            abilities={abilities}
+                            abilityTab={abilityTab}
+                            onTabChange={setAbilityTab}
+                            activeAbilities={activeAbilities}
+                            passiveAbilities={passiveAbilities}
+                            onOpenAbilityPicker={() => setIsAbilityPickerOpen(true)}
+                            renderAbilityItem={renderAbilityItem}
+                        />
 
                         {/* Card Perícias */}
                         <ExpertiseSection
@@ -7573,7 +7516,7 @@ export default function CharacterSheet() {
                                 : "Tipo não informado"}
                         </div>
                     </div>
-                    <div className="flex flex-wrap gap-2 text-xs">
+                    <div className="flex flex-wrap gap-2 md:text-sm">
                         {selectedAbility?.is_active !== undefined && (
                             <span className="border border-blue-500/40 text-blue-200 px-2 py-0.5 rounded">
                                 {selectedAbility.is_active ? "Ativa" : "Passiva"}
@@ -7602,26 +7545,6 @@ export default function CharacterSheet() {
                                 ? selectedAbility.description
                                 : "Descrição não disponível."}
                         </span>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                        <span className="text-zinc-400 text-sm">Requisitos</span>
-                        {selectedAbilityRequirementsText ? (
-                            <pre className="text-zinc-200 text-xs whitespace-pre-wrap wrap-break-words bg-black/30 rounded p-2 border border-zinc-700">
-                                {selectedAbilityRequirementsText}
-                            </pre>
-                        ) : (
-                            <span className="text-zinc-200">Sem requisitos registrados.</span>
-                        )}
-                    </div>
-                    <div className="flex flex-col gap-1">
-                        <span className="text-zinc-400 text-sm">Efeito</span>
-                        {selectedAbilityEffectText ? (
-                            <pre className="text-zinc-200 text-xs whitespace-pre-wrap wrap-break-words bg-black/30 rounded p-2 border border-zinc-700">
-                                {selectedAbilityEffectText}
-                            </pre>
-                        ) : (
-                            <span className="text-zinc-200">Efeito não disponível.</span>
-                        )}
                     </div>
                 </div>
             </Modal>
