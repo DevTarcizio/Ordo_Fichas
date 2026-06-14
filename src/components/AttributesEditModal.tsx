@@ -39,30 +39,33 @@ export default function AttributesEditModal({
             className="w-[min(100%-1.5rem,64rem)] max-h-[85vh] overflow-y-auto scrollbar-ordo p-4 md:p-6"
         >
             <div className="flex justify-between items-center mb-4">
-                <h2 className="font-bigtitle text-2xl text-blue-400">Editar Atributos</h2>
+                <h2 className="font-elegant_text text-2xl text-amber-500">editar Atributos</h2>
             </div>
 
-            <div className="flex justify-center">
-                <AttributesCard
-                    mode="edit"
-                    avatarMarkSrc={avatarMarkSrc}
-                    values={{
-                        agility: form.atrib_agility,
-                        intellect: form.atrib_intellect,
-                        vitallity: form.atrib_vitallity,
-                        presence: form.atrib_presence,
-                        strength: form.atrib_strength
-                    }}
-                    inputNames={{
-                        agility: "atrib_agility",
-                        intellect: "atrib_intellect",
-                        vitallity: "atrib_vitallity",
-                        presence: "atrib_presence",
-                        strength: "atrib_strength"
-                    }}
-                    onChange={onChange}
-                />
-            </div>
+            <div className="flex justify-center px-6 py-6">
+                
+                <div className="translate-x-1">
+                    <AttributesCard
+                        mode="edit"
+                        avatarMarkSrc={avatarMarkSrc}
+                        values={{
+                            agility: form.atrib_agility,
+                            intellect: form.atrib_intellect,
+                            vitallity: form.atrib_vitallity,
+                            presence: form.atrib_presence,
+                            strength: form.atrib_strength
+                        }}
+                        inputNames={{
+                            agility: "atrib_agility",
+                            intellect: "atrib_intellect",
+                            vitallity: "atrib_vitallity",
+                            presence: "atrib_presence",
+                            strength: "atrib_strength"
+                        }}
+                        onChange={onChange}
+                    />
+                </div>
+            </div>  
 
             <div className="flex justify-end gap-3 mt-6">
                 <button

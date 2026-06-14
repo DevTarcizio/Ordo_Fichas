@@ -102,24 +102,24 @@ function StatusSectionBase({
             </div>
 
             <div className="border-t border-zinc-700 pt-4">
-                <div className="text-blue-300 font-smalltitle text-lg text-center">
+                <div className="text-amber-500 font-elegant_text text-lg text-center">
                     Defesas
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-3">
                     <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
-                        <div className="text-xs text-zinc-400 font-text">Passiva</div>
+                        <div className="text-sm text-zinc-400 font-text">Passiva</div>
                         <div className="text-white text-lg font-text">
                             {character.defense_passive + defenseBonus}
                         </div>
                     </div>
                     <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
-                        <div className="text-xs text-zinc-400 font-text">Esquiva</div>
+                        <div className="text-sm text-zinc-400 font-text">Esquiva</div>
                         <div className="text-white text-lg font-text">
                             {character.defense_dodging + defenseBonus}
                         </div>
                     </div>
                     <div className="bg-zinc-900/60 border border-zinc-700 rounded-lg p-2 text-center">
-                        <div className="text-xs text-zinc-400 font-text">Bloqueio</div>
+                        <div className="text-sm text-zinc-400 font-text">Bloqueio</div>
                         <div className="text-white text-lg font-text">
                             {character.defense_blocking + defenseBonus}
                         </div>
