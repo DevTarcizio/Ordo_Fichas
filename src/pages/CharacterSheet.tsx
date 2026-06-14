@@ -2,7 +2,7 @@
 import { useNavigate, useParams } from "react-router-dom"
 import { api } from "../services/api"
 import MainLayout from "../components/MainLayout"
-import { ChevronDown, Eye, EyeOff, Info, Pencil, Plus, Trash2, X } from "lucide-react"
+import { ChevronDown, Eye, EyeOff, Info, Pencil, Trash2, X } from "lucide-react"
 import { formatEnum, reverseFormatEnum } from "../utils"
 import { useAuth } from "../contexts/useAuth"
 import type {
@@ -707,17 +707,6 @@ const isRitualPrediletoName = (value: string) => {
 const isTatuagemRitualisticaName = (value: string) => {
     const normalized = normalizeText(value)
     return normalized === "tatuagem ritualistica"
-}
-
-const toAbilityJson = (value: unknown) => {
-    if (value === null || value === undefined) return ""
-    if (typeof value === "string") return value
-    if (typeof value === "number" || typeof value === "boolean") return String(value)
-    try {
-        return JSON.stringify(value, null, 2)
-    } catch {
-        return String(value)
-    }
 }
 
 const proficiencyDetails = [
@@ -5103,20 +5092,11 @@ export default function CharacterSheet() {
         (ability) =>
             !ability.is_active && normalizeText(ability.name) !== "golpe demolidor"
     )
-    const selectedAbilityRequirements = selectedAbility?.requirements ?? []
     const currentEffort = character.effort_points + temporaryEffort
     const statusCharacter =
         temporaryEffort > 0
             ? { ...character, effort_points: character.effort_points + temporaryEffort }
             : character
-    const selectedAbilityRequirementsText =
-        selectedAbilityRequirements.length > 0
-            ? toAbilityJson(selectedAbilityRequirements)
-            : ""
-    const selectedAbilityEffectText =
-        selectedAbility && selectedAbility.effect && Object.keys(selectedAbility.effect).length > 0
-            ? toAbilityJson(selectedAbility.effect)
-            : ""
     const opportunityAttackCost = 1
     const demolishingStrikeCost = 1
     const tirelessCost = 2
